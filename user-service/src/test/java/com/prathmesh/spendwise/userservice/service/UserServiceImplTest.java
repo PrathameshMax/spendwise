@@ -6,7 +6,7 @@ import com.prathmesh.spendwise.userservice.entity.User;
 import com.prathmesh.spendwise.userservice.exception.ResourceNotFoundException;
 import com.prathmesh.spendwise.userservice.mapper.UserMapper;
 import com.prathmesh.spendwise.userservice.repository.UserRepository;
-import com.prathmesh.spendwise.userservice.service.impl.UserServiceImpl;
+import com.prathmesh.spendwise.userservice.impl.UserServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -20,7 +20,6 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
-import org.mockito.Mock;
 
 @ExtendWith(MockitoExtension.class)
 public class UserServiceImplTest {

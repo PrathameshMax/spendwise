@@ -2,7 +2,7 @@ package com.prathmesh.spendwise.userservice.controller;
 
 import com.prathmesh.spendwise.userservice.dto.request.UserRequest;
 import com.prathmesh.spendwise.userservice.dto.response.UserResponse;
-import com.prathmesh.spendwise.userservice.service.UserService;
+import com.prathmesh.spendwise.userservice.UserService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;

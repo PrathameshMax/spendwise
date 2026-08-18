@@ -1,4 +1,4 @@
-package com.prathmesh.spendwise.userservice.service;
+package com.prathmesh.spendwise.userservice;
 
 import com.prathmesh.spendwise.userservice.dto.request.UserRequest;
 import com.prathmesh.spendwise.userservice.dto.response.UserResponse;

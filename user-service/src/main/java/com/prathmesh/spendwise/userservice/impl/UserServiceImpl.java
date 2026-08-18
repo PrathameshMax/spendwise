@@ -1,4 +1,4 @@
-package com.prathmesh.spendwise.userservice.service.impl;
+package com.prathmesh.spendwise.userservice.impl;
 
 import com.prathmesh.spendwise.userservice.dto.request.UserRequest;
 import com.prathmesh.spendwise.userservice.dto.response.UserResponse;
@@ -6,10 +6,9 @@ import com.prathmesh.spendwise.userservice.entity.User;
 import com.prathmesh.spendwise.userservice.exception.ResourceNotFoundException;
 import com.prathmesh.spendwise.userservice.mapper.UserMapper;
 import com.prathmesh.spendwise.userservice.repository.UserRepository;
-import com.prathmesh.spendwise.userservice.service.UserService;
+import com.prathmesh.spendwise.userservice.UserService;
 import org.springframework.stereotype.Service;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;

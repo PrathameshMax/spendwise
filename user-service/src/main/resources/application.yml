@@ -20,6 +20,8 @@ spring:
 
     properties:
       hibernate:
+        jdbc:
+          time_zone: Asia/Kolkata
         format_sql: true
 
   flyway:
