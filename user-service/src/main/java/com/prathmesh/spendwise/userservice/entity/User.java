@@ -17,7 +17,6 @@ import java.time.LocalDateTime;
 @EntityListeners(AuditingEntityListener.class)
 @Entity
 @Table(name = "users")
-@EnableJpaAuditing
 public class User {
 
     @Id
