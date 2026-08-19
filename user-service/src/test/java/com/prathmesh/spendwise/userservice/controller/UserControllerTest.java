@@ -8,17 +8,24 @@ import com.prathmesh.spendwise.userservice.exception.ResourceNotFoundException;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 import org.springframework.data.jpa.mapping.JpaMetamodelMappingContext;
 import static org.hamcrest.Matchers.containsString;
+import org.springframework.data.domain.PageImpl;
+import org.mockito.ArgumentCaptor;
+
+import org.springframework.data.domain.Sort;
 
 @WebMvcTest(UserController.class)
 public class UserControllerTest {
@@ -88,18 +95,23 @@ public class UserControllerTest {
         response.setEmail("prathamesh@gmail.com");
         response.setPhone("9876543210");
 
-        when(userService.getAllUsers())
-                .thenReturn(List.of(response));
+        Page<UserResponse> page =
+                new PageImpl<>(List.of(response));
+
+        when(userService.getAllUsers(any(Pageable.class)))
+                .thenReturn(page);
 
         mockMvc.perform(
                         get("/api/v1/users")
+                                .param("page", "0")
+                                .param("size", "1")
                 )
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.size()").value(1))
-                .andExpect(jsonPath("$[0].id").value(1))
-                .andExpect(jsonPath("$[0].firstName").value("Prathamesh"));
+                .andExpect(jsonPath("$.content").isArray())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.size").value(1));
 
-        verify(userService).getAllUsers();
+        verify(userService).getAllUsers(any(Pageable.class));
     }
 
 
@@ -243,5 +255,123 @@ public class UserControllerTest {
         mockMvc.perform(get("/api/v1/users/99"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.status").value(404));
+    }
+
+    @Test
+    void getAllUsers_shouldUseDefaultPagination() throws Exception {
+
+        UserResponse response = new UserResponse();
+        response.setId(1L);
+        response.setFirstName("Prathamesh");
+
+        Page<UserResponse> page =
+                new PageImpl<>(List.of(response));
+
+        when(userService.getAllUsers(any(Pageable.class)))
+                .thenReturn(page);
+
+        mockMvc.perform(get("/api/v1/users"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isArray());
+
+        ArgumentCaptor<Pageable> pageableCaptor =
+                ArgumentCaptor.forClass(Pageable.class);
+
+        verify(userService).getAllUsers(pageableCaptor.capture());
+
+        Pageable pageable = pageableCaptor.getValue();
+
+        assertEquals(0, pageable.getPageNumber());
+        assertEquals(10, pageable.getPageSize());
+    }
+
+    @Test
+    void getAllUsers_shouldLimitMaximumPageSize() throws Exception {
+
+        Page<UserResponse> page =
+                new PageImpl<>(List.of());
+
+        when(userService.getAllUsers(any(Pageable.class)))
+                .thenReturn(page);
+
+        mockMvc.perform(get("/api/v1/users")
+                        .param("page", "0")
+                        .param("size", "1000"))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<Pageable> pageableCaptor =
+                ArgumentCaptor.forClass(Pageable.class);
+
+        verify(userService).getAllUsers(pageableCaptor.capture());
+
+        Pageable pageable = pageableCaptor.getValue();
+
+        assertEquals(50, pageable.getPageSize());
+    }
+
+    @Test
+    void getAllUsers_shouldAcceptSorting() throws Exception {
+
+        Page<UserResponse> page =
+                new PageImpl<>(List.of());
+
+        when(userService.getAllUsers(any(Pageable.class)))
+                .thenReturn(page);
+
+        mockMvc.perform(get("/api/v1/users")
+                        .param("page", "0")
+                        .param("size", "10")
+                        .param("sort", "firstName,asc"))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<Pageable> pageableCaptor =
+                ArgumentCaptor.forClass(Pageable.class);
+
+        verify(userService).getAllUsers(pageableCaptor.capture());
+
+        Pageable pageable = pageableCaptor.getValue();
+
+        assertEquals(0, pageable.getPageNumber());
+        assertEquals(10, pageable.getPageSize());
+
+        assertTrue(pageable.getSort().isSorted());
+        assertEquals(
+                "firstName",
+                pageable.getSort().getOrderFor("firstName").getProperty()
+        );
+        assertEquals(
+                Sort.Direction.ASC,
+                pageable.getSort().getOrderFor("firstName").getDirection()
+        );
+    }
+
+    @Test
+    void getAllUsers_shouldSupportDescendingSorting() throws Exception {
+
+        Page<UserResponse> page =
+                new PageImpl<>(List.of());
+
+        when(userService.getAllUsers(any(Pageable.class)))
+                .thenReturn(page);
+
+        mockMvc.perform(get("/api/v1/users")
+                        .param("sort", "createdAt,desc"))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<Pageable> pageableCaptor =
+                ArgumentCaptor.forClass(Pageable.class);
+
+        verify(userService).getAllUsers(pageableCaptor.capture());
+
+        Pageable pageable = pageableCaptor.getValue();
+
+        assertTrue(pageable.getSort().isSorted());
+
+        Sort.Order order =
+                pageable.getSort().getOrderFor("createdAt");
+
+        assertNotNull(order);
+        assertEquals("createdAt", order.getProperty());
+        assertEquals(Sort.Direction.DESC, order.getDirection());
     }
 }

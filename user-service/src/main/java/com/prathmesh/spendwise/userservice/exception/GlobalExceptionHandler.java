@@ -69,4 +69,15 @@ public class GlobalExceptionHandler {
         );
 
     }
+
+    @ExceptionHandler(InvalidSortFieldException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public ErrorResponse handleInvalidSortField(InvalidSortFieldException ex){
+        return new ErrorResponse(
+                LocalDateTime.now(),
+                HttpStatus.BAD_REQUEST.value(),
+                ex.getMessage(),
+                null, null
+                );
+    }
 }

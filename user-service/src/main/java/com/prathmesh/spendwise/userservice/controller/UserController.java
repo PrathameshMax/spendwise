@@ -7,6 +7,8 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
@@ -19,6 +21,8 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import com.prathmesh.spendwise.userservice.exception.*;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.Parameters;
 
 
 @RestController
@@ -55,6 +59,23 @@ public class UserController {
                     )
             )
     })
+    @Parameters({
+            @Parameter(
+                    name = "page",
+                    description = "Page number (zero-based)",
+                    example = "0"
+            ),
+            @Parameter(
+                    name = "size",
+                    description = "Number of users per page. Maximum 50.",
+                    example = "10"
+            ),
+            @Parameter(
+                    name = "sort",
+                    description = "Sorting criteria in the format: property,direction",
+                    example = "createdAt,desc"
+            )
+    })
     @PostMapping
     public ResponseEntity<UserResponse> createUser(@Valid @RequestBody UserRequest request) {
 
@@ -85,8 +106,8 @@ public class UserController {
             )
     )
     @GetMapping
-    public List<UserResponse> getAllUsers() {
-        return userService.getAllUsers();
+    public Page<UserResponse> getAllUsers(Pageable pageable) {
+        return userService.getAllUsers(pageable);
     }
 
     @Operation(

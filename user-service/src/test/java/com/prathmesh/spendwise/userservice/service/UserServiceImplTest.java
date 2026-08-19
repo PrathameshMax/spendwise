@@ -3,16 +3,19 @@ package com.prathmesh.spendwise.userservice.service;
 import com.prathmesh.spendwise.userservice.dto.request.UserRequest;
 import com.prathmesh.spendwise.userservice.dto.response.UserResponse;
 import com.prathmesh.spendwise.userservice.entity.User;
+import com.prathmesh.spendwise.userservice.exception.InvalidSortFieldException;
 import com.prathmesh.spendwise.userservice.exception.ResourceNotFoundException;
 import com.prathmesh.spendwise.userservice.mapper.UserMapper;
 import com.prathmesh.spendwise.userservice.repository.UserRepository;
 import com.prathmesh.spendwise.userservice.impl.UserServiceImpl;
+import com.prathmesh.spendwise.userservice.validation.UserSortValidator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.*;
 
 import java.util.Arrays;
 import java.util.List;
@@ -32,6 +35,9 @@ public class UserServiceImplTest {
 
     @InjectMocks
     private UserServiceImpl userService;
+
+    @Mock
+    private UserSortValidator userSortValidator;
 
     private User user;
     private UserRequest userRequest;
@@ -112,8 +118,12 @@ public class UserServiceImplTest {
         response2.setEmail("dipti@gmail.com");
         response2.setPhone("9234567890");
 
-        when(userRepository.findAll())
-                .thenReturn(Arrays.asList(user, user2));
+        // Page should contain both users
+        Page<User> userPage =
+                new PageImpl<>(List.of(user, user2));
+
+        when(userRepository.findAll(any(Pageable.class)))
+                .thenReturn(userPage);
 
         when(userMapper.toResponse(user))
                 .thenReturn(userResponse);
@@ -121,15 +131,21 @@ public class UserServiceImplTest {
         when(userMapper.toResponse(user2))
                 .thenReturn(response2);
 
-        List<UserResponse> result = userService.getAllUsers();
+        Page<UserResponse> result =
+                userService.getAllUsers(Pageable.ofSize(2));
 
         assertNotNull(result);
-        assertEquals(2, result.size());
+        assertEquals(2, result.getContent().size());
 
-        assertEquals("Prathamesh", result.get(0).getFirstName());
-        assertEquals("Dipti", result.get(1).getFirstName());
+        assertEquals("Prathamesh",
+                result.getContent().get(0).getFirstName());
 
-        verify(userRepository).findAll();
+        assertEquals("Dipti",
+                result.getContent().get(1).getFirstName());
+
+        verify(userRepository)
+                .findAll(any(Pageable.class));
+
         verify(userMapper).toResponse(user);
         verify(userMapper).toResponse(user2);
     }
@@ -280,7 +296,31 @@ public class UserServiceImplTest {
     }
 
 
+    @Test
+    void getAllUsers_shouldRejectInvalidSortField() {
 
+        Pageable pageable = PageRequest.of(
+                0,
+                10,
+                Sort.by("password").ascending()
+        );
+
+        doThrow(new InvalidSortFieldException(
+                "Sorting by field 'password' is not allowed"
+        ))
+                .when(userSortValidator)
+                .validate(pageable.getSort());
+
+        assertThrows(
+                InvalidSortFieldException.class,
+                () -> userService.getAllUsers(pageable)
+        );
+
+        verify(userSortValidator).validate(pageable.getSort());
+
+        verify(userRepository, never())
+                .findAll(any(Pageable.class));
+    }
 
 
 }

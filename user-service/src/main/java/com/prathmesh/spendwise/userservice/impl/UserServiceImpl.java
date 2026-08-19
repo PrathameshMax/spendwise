@@ -7,8 +7,11 @@ import com.prathmesh.spendwise.userservice.exception.ResourceNotFoundException;
 import com.prathmesh.spendwise.userservice.mapper.UserMapper;
 import com.prathmesh.spendwise.userservice.repository.UserRepository;
 import com.prathmesh.spendwise.userservice.UserService;
+import com.prathmesh.spendwise.userservice.validation.UserSortValidator;
 import org.springframework.stereotype.Service;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -18,13 +21,15 @@ public class UserServiceImpl implements UserService {
 
     private final UserRepository userRepository;
     private final UserMapper userMapper;
+    private final UserSortValidator userSortValidator;
 
     private final Map<Long, User> users = new HashMap<>();
     private Long idCounter = 1L;
 
-    public UserServiceImpl(UserRepository userRepository, UserMapper userMapper) {
+    public UserServiceImpl(UserRepository userRepository, UserMapper userMapper, UserSortValidator userSortValidator) {
         this.userRepository = userRepository;
         this.userMapper = userMapper;
+        this.userSortValidator = userSortValidator;
     }
 
     @Override
@@ -38,12 +43,12 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public List<UserResponse> getAllUsers() {
+    public Page<UserResponse> getAllUsers(Pageable pageable) {
 
-        return userRepository.findAll()
-                .stream()
-                .map(this::mapToResponse)
-                .toList();
+        userSortValidator.validate(pageable.getSort());
+
+        return userRepository.findAll(pageable)
+                .map(userMapper::toResponse);
     }
 
     @Override
