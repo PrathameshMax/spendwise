@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prathmesh.spendwise.userservice.UserService;
 import com.prathmesh.spendwise.userservice.dto.request.UserRequest;
 import com.prathmesh.spendwise.userservice.dto.response.UserResponse;
+import com.prathmesh.spendwise.userservice.exception.ResourceNotFoundException;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -17,6 +18,7 @@ import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 import org.springframework.data.jpa.mapping.JpaMetamodelMappingContext;
+import static org.hamcrest.Matchers.containsString;
 
 @WebMvcTest(UserController.class)
 public class UserControllerTest {
@@ -63,6 +65,7 @@ public class UserControllerTest {
                                 .content(objectMapper.writeValueAsString(request))
                 )
                 .andExpect(status().isCreated())
+                .andExpect(header().string("Location", containsString("/api/v1/users")))
                 .andExpect(jsonPath("$.id").value(1))
                 .andExpect(jsonPath("$.firstName").value("Prathamesh"))
                 .andExpect(jsonPath("$.email").value("prathamesh@gmail.com"));
@@ -183,7 +186,8 @@ public class UserControllerTest {
         mockMvc.perform(
                         delete("/api/v1/users/1")
                 )
-                .andExpect(status().isNoContent());
+                .andExpect(status().isNoContent())
+                .andExpect(content().string(""));
 
         verify(userService).deleteUser(1L);
     }
@@ -212,5 +216,32 @@ public class UserControllerTest {
 
         verify(userService, never())
                 .createUser(any(UserRequest.class));
+    }
+
+    @Test
+    void createUser_shouldReturnBadRequestWhenValidationFails() throws Exception {
+
+        UserRequest request = new UserRequest();
+        request.setFirstName("");
+        request.setLastName("");
+        request.setEmail("invalid-email");
+        request.setPhone("");
+
+        mockMvc.perform(post("/api/v1/users")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400));
+    }
+
+    @Test
+    void getUserById_shouldReturnNotFoundWhenUserDoesNotExist() throws Exception {
+
+        when(userService.getUserById(99L))
+                .thenThrow(new ResourceNotFoundException("User not found"));
+
+        mockMvc.perform(get("/api/v1/users/99"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.status").value(404));
     }
 }
