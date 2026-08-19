@@ -18,4 +18,6 @@ public interface UserService {
     UserResponse updateUser(Long id, UserRequest request);
 
     void deleteUser(Long id);
+
+    Page<UserResponse> searchUsers(String search, Pageable pageable);
 }

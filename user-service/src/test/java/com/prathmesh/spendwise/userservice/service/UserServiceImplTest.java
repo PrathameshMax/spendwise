@@ -322,5 +322,39 @@ public class UserServiceImplTest {
                 .findAll(any(Pageable.class));
     }
 
+    @Test
+    void searchUsers_shouldPassSearchAndPageableToRepository() {
+
+        Pageable pageable = PageRequest.of(
+                0,
+                2,
+                Sort.by("createdAt").descending()
+        );
+
+        Page<User> userPage =
+                new PageImpl<>(List.of(user));
+
+        when(userRepository.searchUsers("gmail", pageable))
+                .thenReturn(userPage);
+
+        when(userMapper.toResponse(user))
+                .thenReturn(userResponse);
+
+        Page<UserResponse> result =
+                userService.searchUsers("gmail", pageable);
+
+        assertNotNull(result);
+        assertEquals(1, result.getContent().size());
+
+        verify(userSortValidator)
+                .validate(pageable.getSort());
+
+        verify(userRepository)
+                .searchUsers("gmail", pageable);
+
+        verify(userMapper)
+                .toResponse(user);
+    }
+
 
 }

@@ -4,12 +4,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prathmesh.spendwise.userservice.UserService;
 import com.prathmesh.spendwise.userservice.dto.request.UserRequest;
 import com.prathmesh.spendwise.userservice.dto.response.UserResponse;
+import com.prathmesh.spendwise.userservice.exception.InvalidSortFieldException;
 import com.prathmesh.spendwise.userservice.exception.ResourceNotFoundException;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.*;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -22,9 +22,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 import org.springframework.data.jpa.mapping.JpaMetamodelMappingContext;
 import static org.hamcrest.Matchers.containsString;
-import org.springframework.data.domain.PageImpl;
-import org.mockito.ArgumentCaptor;
 
+import org.mockito.ArgumentCaptor;
 import org.springframework.data.domain.Sort;
 
 @WebMvcTest(UserController.class)
@@ -372,6 +371,291 @@ public class UserControllerTest {
 
         assertNotNull(order);
         assertEquals("createdAt", order.getProperty());
+        assertEquals(Sort.Direction.DESC, order.getDirection());
+    }
+
+    @Test
+    void getAllUsers_shouldSupportSearchPaginationAndSorting()
+            throws Exception {
+
+        UserResponse response = new UserResponse();
+
+        response.setId(1L);
+        response.setFirstName("Prathamesh");
+        response.setLastName("Padavekar");
+        response.setEmail("prathamesh@gmail.com");
+
+        Pageable pageable = PageRequest.of(
+                0,
+                2,
+                Sort.by("createdAt").descending()
+        );
+
+        Page<UserResponse> page =
+                new PageImpl<>(
+                        List.of(response),
+                        pageable,
+                        1
+                );
+
+        when(userService.searchUsers(
+                eq("gmail"),
+                any(Pageable.class)
+        )).thenReturn(page);
+
+        mockMvc.perform(get("/api/v1/users")
+                        .param("search", "gmail")
+                        .param("page", "0")
+                        .param("size", "2")
+                        .param("sort", "createdAt,desc"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isArray())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].email")
+                        .value("prathamesh@gmail.com"))
+                .andExpect(jsonPath("$.number").value(0))
+                .andExpect(jsonPath("$.size").value(2));
+    }
+
+    @Test
+    void getAllUsers_shouldRejectInvalidSortWhenSearching()
+            throws Exception {
+
+        when(userService.searchUsers(
+                eq("gmail"),
+                any(Pageable.class)
+        )).thenThrow(
+                new InvalidSortFieldException(
+                        "Sorting by field 'password' is not allowed"
+                )
+        );
+
+        mockMvc.perform(get("/api/v1/users")
+                        .param("search", "gmail")
+                        .param("page", "0")
+                        .param("size", "2")
+                        .param("sort", "password,desc"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.message")
+                        .value("Sorting by field 'password' is not allowed"));
+    }
+
+    @Test
+    void getAllUsers_shouldIgnoreEmptySearch() throws Exception {
+
+        UserResponse response = new UserResponse();
+
+        response.setId(1L);
+        response.setFirstName("Prathamesh");
+        response.setLastName("Padavekar");
+        response.setEmail("prathamesh@gmail.com");
+
+        Page<UserResponse> page =
+                new PageImpl<>(
+                        List.of(response),
+                        PageRequest.of(0, 10),
+                        1
+                );
+
+        when(userService.getAllUsers(any(Pageable.class)))
+                .thenReturn(page);
+
+        mockMvc.perform(get("/api/v1/users")
+                        .param("search", ""))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isArray())
+                .andExpect(jsonPath("$.content.length()").value(1));
+
+        verify(userService).getAllUsers(any(Pageable.class));
+
+        verify(userService, never())
+                .searchUsers(anyString(), any(Pageable.class));
+    }
+
+    @Test
+    void getAllUsers_shouldIgnoreWhitespaceSearch() throws Exception {
+        UserResponse response = new UserResponse();
+
+        response.setId(1L);
+        response.setFirstName("Prathamesh");
+        response.setLastName("Padavekar");
+        response.setEmail("prathamesh@gmail.com");
+
+        Page<UserResponse> page =
+                new PageImpl<>(
+                        List.of(response),
+                        PageRequest.of(0, 10),
+                        1
+                );
+
+        when(userService.getAllUsers(any(Pageable.class)))
+                .thenReturn(page);
+
+        mockMvc.perform(get("/api/v1/users")
+                        .param("search", "   "))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isArray())
+                .andExpect(jsonPath("$.content.length()").value(1));
+
+        verify(userService).getAllUsers(any(Pageable.class));
+
+        verify(userService, never())
+                .searchUsers(anyString(), any(Pageable.class));
+    }
+
+    @Test
+    void getAllUsers_shouldTrimSearchValue() throws Exception {
+        UserResponse response = new UserResponse();
+
+        response.setId(1L);
+        response.setFirstName("Prathamesh");
+        response.setLastName("Padavekar");
+        response.setEmail("prathamesh@gmail.com");
+
+        Page<UserResponse> page =
+                new PageImpl<>(
+                        List.of(response),
+                        PageRequest.of(0, 10),
+                        1
+                );
+
+        when(userService.searchUsers(
+                eq("Prathamesh"),
+                any(Pageable.class)
+        )).thenReturn(page);
+
+        mockMvc.perform(get("/api/v1/users")
+                        .param("search", "  Prathamesh  "))
+                .andExpect(status().isOk());
+
+        verify(userService).searchUsers(
+                eq("Prathamesh"),
+                any(Pageable.class)
+        );
+    }
+
+    @Test
+    void getAllUsers_shouldReturnEmptyPageWhenSearchHasNoMatch()
+            throws Exception {
+
+        Page<UserResponse> emptyPage =
+                new PageImpl<>(
+                        List.of(),
+                        PageRequest.of(0, 10),
+                        0
+                );
+
+        when(userService.searchUsers(
+                eq("xyz123"),
+                any(Pageable.class)
+        )).thenReturn(emptyPage);
+
+        mockMvc.perform(get("/api/v1/users")
+                        .param("search", "xyz123"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isArray())
+                .andExpect(jsonPath("$.content").isEmpty())
+                .andExpect(jsonPath("$.totalElements").value(0));
+    }
+
+    @Test
+    void getAllUsers_shouldBuildCorrectPageable() throws Exception {
+
+        UserResponse response = new UserResponse();
+
+        response.setId(1L);
+        response.setFirstName("Prathamesh");
+        response.setLastName("Padavekar");
+        response.setEmail("prathamesh@gmail.com");
+        Page<UserResponse> page =
+                new PageImpl<>(
+                        List.of(response),
+                        PageRequest.of(
+                                1,
+                                2,
+                                Sort.by("createdAt").descending()
+                        ),
+                        5
+                );
+
+        when(userService.getAllUsers(any(Pageable.class)))
+                .thenReturn(page);
+
+        mockMvc.perform(get("/api/v1/users")
+                        .param("page", "1")
+                        .param("size", "2")
+                        .param("sort", "createdAt,desc"))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<Pageable> pageableCaptor =
+                ArgumentCaptor.forClass(Pageable.class);
+
+        verify(userService).getAllUsers(
+                pageableCaptor.capture()
+        );
+
+        Pageable pageable = pageableCaptor.getValue();
+
+        assertEquals(1, pageable.getPageNumber());
+        assertEquals(2, pageable.getPageSize());
+
+        Sort.Order order =
+                pageable.getSort().getOrderFor("createdAt");
+
+        assertNotNull(order);
+        assertEquals(Sort.Direction.DESC, order.getDirection());
+    }
+
+    @Test
+    void getAllUsers_shouldPassSearchAndPageableToService()
+            throws Exception {
+        UserResponse response = new UserResponse();
+
+        response.setId(1L);
+        response.setFirstName("Prathamesh");
+        response.setLastName("Padavekar");
+        response.setEmail("prathamesh@gmail.com");
+        Page<UserResponse> page =
+                new PageImpl<>(
+                        List.of(response),
+                        PageRequest.of(
+                                0,
+                                2,
+                                Sort.by("createdAt").descending()
+                        ),
+                        1
+                );
+
+        when(userService.searchUsers(
+                eq("gmail"),
+                any(Pageable.class)
+        )).thenReturn(page);
+
+        mockMvc.perform(get("/api/v1/users")
+                        .param("search", "gmail")
+                        .param("page", "0")
+                        .param("size", "2")
+                        .param("sort", "createdAt,desc"))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<Pageable> pageableCaptor =
+                ArgumentCaptor.forClass(Pageable.class);
+
+        verify(userService).searchUsers(
+                eq("gmail"),
+                pageableCaptor.capture()
+        );
+
+        Pageable pageable = pageableCaptor.getValue();
+
+        assertEquals(0, pageable.getPageNumber());
+        assertEquals(2, pageable.getPageSize());
+
+        Sort.Order order =
+                pageable.getSort().getOrderFor("createdAt");
+
+        assertNotNull(order);
         assertEquals(Sort.Direction.DESC, order.getDirection());
     }
 }

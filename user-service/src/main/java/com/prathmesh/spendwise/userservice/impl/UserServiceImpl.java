@@ -52,6 +52,15 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
+    public Page<UserResponse> searchUsers(String search, Pageable pageable) {
+
+        userSortValidator.validate(pageable.getSort());
+
+        return userRepository.searchUsers(search, pageable)
+                .map(userMapper::toResponse);
+    }
+
+    @Override
     public UserResponse getUserById(Long id) {
 
         User user = userRepository.findById(id)

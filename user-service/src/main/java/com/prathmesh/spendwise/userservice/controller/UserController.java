@@ -9,6 +9,8 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
@@ -23,6 +25,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.Parameters;
+import org.springdoc.core.annotations.ParameterObject;
 
 
 @RestController
@@ -92,9 +95,12 @@ public class UserController {
                 .body(response);
     }
 
+
+
     @Operation(
             summary = "Get all users",
-            description = "Returns all registered Users"
+            description = "Returns a paginated list of users. \"\n" +
+                    "                + \"Optionally filters users by first name, last name, or email."
     )
     @ApiResponse(
             responseCode = "200",
@@ -106,8 +112,26 @@ public class UserController {
             )
     )
     @GetMapping
-    public Page<UserResponse> getAllUsers(Pageable pageable) {
-        return userService.getAllUsers(pageable);
+    public Page<UserResponse> getAllUsers(
+                    @Parameter(
+                    description = "Search by first name, last name, or email",
+                    example = "prathamesh",
+                    required = false
+            )
+            @RequestParam(required = false) String search,
+                    @ParameterObject
+                    @PageableDefault(
+                            page = 0,
+                            size = 10,
+                            sort = "createdAt",
+                            direction = Sort.Direction.DESC
+                    )
+                    Pageable pageable) {
+        if (search == null || search.isBlank()) {
+            return userService.getAllUsers(pageable);
+        }
+
+        return userService.searchUsers(search.trim(), pageable);
     }
 
     @Operation(
