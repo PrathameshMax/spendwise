@@ -7,8 +7,10 @@ import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabas
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 
 import java.util.Optional;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
+import org.springframework.dao.DataIntegrityViolationException;
 
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -87,5 +89,31 @@ public class UserRepositoryTest {
                 userRepository.findById(savedUser.getId());
 
         assertTrue(result.isEmpty());
+    }
+
+    @Test
+    void save_shouldRejectDuplicateEmail() {
+
+        String duplicateEmail =
+                "duplicate-" + UUID.randomUUID() + "@gmail.com";
+
+        User user1 = new User();
+        user1.setFirstName("Prathamesh");
+        user1.setLastName("Padavekar");
+        user1.setEmail(duplicateEmail);
+        user1.setPhone("9876543210");
+
+        userRepository.saveAndFlush(user1);
+
+        User user2 = new User();
+        user2.setFirstName("Dipti");
+        user2.setLastName("Malave");
+        user2.setEmail(duplicateEmail);
+        user2.setPhone("9234567890");
+
+        assertThrows(
+                DataIntegrityViolationException.class,
+                () -> userRepository.saveAndFlush(user2)
+        );
     }
 }

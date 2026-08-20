@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prathmesh.spendwise.userservice.UserService;
 import com.prathmesh.spendwise.userservice.dto.request.UserRequest;
 import com.prathmesh.spendwise.userservice.dto.response.UserResponse;
+import com.prathmesh.spendwise.userservice.exception.DuplicateEmailException;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -212,5 +213,33 @@ public class UserControllerTest {
 
         verify(userService, never())
                 .createUser(any(UserRequest.class));
+    }
+
+    @Test
+    void createUser_shouldReturn409WhenEmailAlreadyExists() throws Exception {
+
+        when(userService.createUser(any(UserRequest.class)))
+                .thenThrow(
+                        new DuplicateEmailException(
+                                "User with email 'duplicate@gmail.com' already exists"
+                        )
+                );
+
+        mockMvc.perform(
+                        post("/api/v1/users")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("""
+                                    {
+                                      "firstName": "Prathamesh",
+                                      "lastName": "Padavekar",
+                                      "email": "duplicate@gmail.com",
+                                      "phone": "9876543210"
+                                    }
+                                    """)
+                )
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.status").value(409))
+                .andExpect(jsonPath("$.message")
+                        .value("User with email 'duplicate@gmail.com' already exists"));
     }
 }

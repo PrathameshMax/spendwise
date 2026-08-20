@@ -3,10 +3,12 @@ package com.prathmesh.spendwise.userservice.impl;
 import com.prathmesh.spendwise.userservice.dto.request.UserRequest;
 import com.prathmesh.spendwise.userservice.dto.response.UserResponse;
 import com.prathmesh.spendwise.userservice.entity.User;
+import com.prathmesh.spendwise.userservice.exception.DuplicateEmailException;
 import com.prathmesh.spendwise.userservice.exception.ResourceNotFoundException;
 import com.prathmesh.spendwise.userservice.mapper.UserMapper;
 import com.prathmesh.spendwise.userservice.repository.UserRepository;
 import com.prathmesh.spendwise.userservice.UserService;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 
 import java.util.HashMap;
@@ -32,9 +34,15 @@ public class UserServiceImpl implements UserService {
 
         User user = userMapper.toEntity(request);
 
-        User savedUser = userRepository.save(user);
+        try {
+            User savedUser = userRepository.saveAndFlush(user);
+            return userMapper.toResponse(savedUser);
 
-        return mapToResponse(savedUser);
+        } catch (DataIntegrityViolationException ex) {
+            throw new DuplicateEmailException(
+                    "User with email '" + request.getEmail() + "' already exists"
+            );
+        }
     }
 
     @Override

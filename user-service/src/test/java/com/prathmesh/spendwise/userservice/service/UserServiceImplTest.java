@@ -3,6 +3,7 @@ package com.prathmesh.spendwise.userservice.service;
 import com.prathmesh.spendwise.userservice.dto.request.UserRequest;
 import com.prathmesh.spendwise.userservice.dto.response.UserResponse;
 import com.prathmesh.spendwise.userservice.entity.User;
+import com.prathmesh.spendwise.userservice.exception.DuplicateEmailException;
 import com.prathmesh.spendwise.userservice.exception.ResourceNotFoundException;
 import com.prathmesh.spendwise.userservice.mapper.UserMapper;
 import com.prathmesh.spendwise.userservice.repository.UserRepository;
@@ -13,6 +14,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataIntegrityViolationException;
 
 import java.util.Arrays;
 import java.util.List;
@@ -72,7 +74,7 @@ public class UserServiceImplTest {
         when(userMapper.toEntity(userRequest))
                 .thenReturn(user);
 
-        when(userRepository.save(user))
+        when(userRepository.saveAndFlush(user))
                 .thenReturn(user);
 
         when(userMapper.toResponse(user))
@@ -86,7 +88,7 @@ public class UserServiceImplTest {
         assertEquals("prathamesh@gmail.com", result.getEmail());
 
         verify(userMapper).toEntity(userRequest);
-        verify(userRepository).save(user);
+        verify(userRepository).saveAndFlush(user);
         verify(userMapper).toResponse(user);
     }
 
@@ -280,7 +282,32 @@ public class UserServiceImplTest {
     }
 
 
+    @Test
+    void createUser_shouldThrowDuplicateEmailException() {
 
+        UserRequest request = new UserRequest();
+        request.setFirstName("Prathamesh");
+        request.setLastName("Padavekar");
+        request.setEmail("duplicate@gmail.com");
+        request.setPhone("9876543210");
+
+        User user = new User();
+
+        when(userMapper.toEntity(request))
+                .thenReturn(user);
+
+        when(userRepository.saveAndFlush(user))
+                .thenThrow(new DataIntegrityViolationException(
+                        "duplicate key value violates unique constraint"
+                ));
+
+        assertThrows(
+                DuplicateEmailException.class,
+                () -> userService.createUser(request)
+        );
+
+        verify(userRepository).saveAndFlush(user);
+    }
 
 
 }

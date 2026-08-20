@@ -18,6 +18,10 @@
     <version>1.0.0-SNAPSHOT</version>
 
     <packaging>pom</packaging>
+    <modules>
+        <module>user-service</module>
+    </modules>
+
 
     <name>SpendWise</name>
     <description>Personal Finance Platform</description>
@@ -38,9 +42,5 @@
         </plugins>
     </build>
 
-    <modules>
-        <module>user-service</module>
-        <module>coding-practise</module>
-    </modules>
 
 </project>
