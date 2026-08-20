@@ -18,6 +18,10 @@
     <version>1.0.0-SNAPSHOT</version>
 
     <packaging>pom</packaging>
+    <modules>
+        <module>user-service</module>
+    </modules>
+
 
     <name>SpendWise</name>
     <description>Personal Finance Platform</description>
@@ -25,9 +29,18 @@
     <properties>
         <java.version>17</java.version>
     </properties>
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <source>8</source>
+                    <target>8</target>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
 
-    <modules>
-        <module>user-service</module>
-    </modules>
 
 </project>

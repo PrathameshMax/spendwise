@@ -3,6 +3,7 @@ package com.prathmesh.spendwise.userservice.service;
 import com.prathmesh.spendwise.userservice.dto.request.UserRequest;
 import com.prathmesh.spendwise.userservice.dto.response.UserResponse;
 import com.prathmesh.spendwise.userservice.entity.User;
+import com.prathmesh.spendwise.userservice.exception.DuplicateEmailException;
 import com.prathmesh.spendwise.userservice.exception.InvalidSortFieldException;
 import com.prathmesh.spendwise.userservice.exception.ResourceNotFoundException;
 import com.prathmesh.spendwise.userservice.mapper.UserMapper;
@@ -15,9 +16,13 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.domain.*;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 
-import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 
@@ -33,11 +38,11 @@ public class UserServiceImplTest {
     @Mock
     private UserMapper userMapper;
 
-    @InjectMocks
-    private UserServiceImpl userService;
-
     @Mock
     private UserSortValidator userSortValidator;
+
+    @InjectMocks
+    private UserServiceImpl userService;
 
     private User user;
     private UserRequest userRequest;
@@ -78,22 +83,72 @@ public class UserServiceImplTest {
         when(userMapper.toEntity(userRequest))
                 .thenReturn(user);
 
-        when(userRepository.save(user))
+        when(userRepository.saveAndFlush(user))
                 .thenReturn(user);
 
         when(userMapper.toResponse(user))
                 .thenReturn(userResponse);
 
-        UserResponse result = userService.createUser(userRequest);
+        UserResponse result =
+                userService.createUser(userRequest);
 
         assertNotNull(result);
         assertEquals(1L, result.getId());
-        assertEquals("Prathamesh", result.getFirstName());
-        assertEquals("prathamesh@gmail.com", result.getEmail());
+        assertEquals(
+                "Prathamesh",
+                result.getFirstName()
+        );
+        assertEquals(
+                "prathamesh@gmail.com",
+                result.getEmail()
+        );
 
         verify(userMapper).toEntity(userRequest);
-        verify(userRepository).save(user);
+        verify(userRepository).saveAndFlush(user);
         verify(userMapper).toResponse(user);
+    }
+
+
+    // --------------------------------------------------
+    // CREATE - DUPLICATE EMAIL
+    // --------------------------------------------------
+
+    @Test
+    void createUser_shouldThrowDuplicateEmailException() {
+
+        UserRequest request = new UserRequest();
+        request.setFirstName("Prathamesh");
+        request.setLastName("Padavekar");
+        request.setEmail("duplicate@gmail.com");
+        request.setPhone("9876543210");
+
+        User duplicateUser = new User();
+
+        when(userMapper.toEntity(request))
+                .thenReturn(duplicateUser);
+
+        when(userRepository.saveAndFlush(duplicateUser))
+                .thenThrow(
+                        new DataIntegrityViolationException(
+                                "duplicate key value violates unique constraint"
+                        )
+                );
+
+        DuplicateEmailException exception =
+                assertThrows(
+                        DuplicateEmailException.class,
+                        () -> userService.createUser(request)
+                );
+
+        assertEquals(
+                "User with email 'duplicate@gmail.com' already exists",
+                exception.getMessage()
+        );
+
+        verify(userMapper).toEntity(request);
+        verify(userRepository).saveAndFlush(duplicateUser);
+        verify(userMapper, never())
+                .toResponse(any(User.class));
     }
 
 
@@ -118,7 +173,6 @@ public class UserServiceImplTest {
         response2.setEmail("dipti@gmail.com");
         response2.setPhone("9234567890");
 
-        // Page should contain both users
         Page<User> userPage =
                 new PageImpl<>(List.of(user, user2));
 
@@ -131,20 +185,29 @@ public class UserServiceImplTest {
         when(userMapper.toResponse(user2))
                 .thenReturn(response2);
 
+        Pageable pageable = Pageable.ofSize(2);
+
         Page<UserResponse> result =
-                userService.getAllUsers(Pageable.ofSize(2));
+                userService.getAllUsers(pageable);
 
         assertNotNull(result);
         assertEquals(2, result.getContent().size());
 
-        assertEquals("Prathamesh",
-                result.getContent().get(0).getFirstName());
+        assertEquals(
+                "Prathamesh",
+                result.getContent().get(0).getFirstName()
+        );
 
-        assertEquals("Dipti",
-                result.getContent().get(1).getFirstName());
+        assertEquals(
+                "Dipti",
+                result.getContent().get(1).getFirstName()
+        );
+
+        verify(userSortValidator)
+                .validate(pageable.getSort());
 
         verify(userRepository)
-                .findAll(any(Pageable.class));
+                .findAll(pageable);
 
         verify(userMapper).toResponse(user);
         verify(userMapper).toResponse(user2);
@@ -164,12 +227,19 @@ public class UserServiceImplTest {
         when(userMapper.toResponse(user))
                 .thenReturn(userResponse);
 
-        UserResponse result = userService.getUserById(1L);
+        UserResponse result =
+                userService.getUserById(1L);
 
         assertNotNull(result);
         assertEquals(1L, result.getId());
-        assertEquals("Prathamesh", result.getFirstName());
-        assertEquals("prathamesh@gmail.com", result.getEmail());
+        assertEquals(
+                "Prathamesh",
+                result.getFirstName()
+        );
+        assertEquals(
+                "prathamesh@gmail.com",
+                result.getEmail()
+        );
 
         verify(userRepository).findById(1L);
         verify(userMapper).toResponse(user);
@@ -197,7 +267,7 @@ public class UserServiceImplTest {
         verify(userRepository).findById(99L);
 
         verify(userMapper, never())
-                .toResponse((User) any(User.class));
+                .toResponse(any(User.class));
     }
 
 
@@ -218,12 +288,21 @@ public class UserServiceImplTest {
                 .thenReturn(userResponse);
 
         UserResponse result =
-                userService.updateUser(1L, userRequest);
+                userService.updateUser(
+                        1L,
+                        userRequest
+                );
 
         assertNotNull(result);
         assertEquals(1L, result.getId());
-        assertEquals("Prathamesh", result.getFirstName());
-        assertEquals("prathamesh@gmail.com", result.getEmail());
+        assertEquals(
+                "Prathamesh",
+                result.getFirstName()
+        );
+        assertEquals(
+                "prathamesh@gmail.com",
+                result.getEmail()
+        );
 
         verify(userRepository).findById(1L);
         verify(userRepository).save(user);
@@ -243,7 +322,10 @@ public class UserServiceImplTest {
 
         assertThrows(
                 ResourceNotFoundException.class,
-                () -> userService.updateUser(99L, userRequest)
+                () -> userService.updateUser(
+                        99L,
+                        userRequest
+                )
         );
 
         verify(userRepository).findById(99L);
@@ -296,6 +378,10 @@ public class UserServiceImplTest {
     }
 
 
+    // --------------------------------------------------
+    // SORTING VALIDATION
+    // --------------------------------------------------
+
     @Test
     void getAllUsers_shouldRejectInvalidSortField() {
 
@@ -305,9 +391,11 @@ public class UserServiceImplTest {
                 Sort.by("password").ascending()
         );
 
-        doThrow(new InvalidSortFieldException(
-                "Sorting by field 'password' is not allowed"
-        ))
+        doThrow(
+                new InvalidSortFieldException(
+                        "Sorting by field 'password' is not allowed"
+                )
+        )
                 .when(userSortValidator)
                 .validate(pageable.getSort());
 
@@ -316,11 +404,17 @@ public class UserServiceImplTest {
                 () -> userService.getAllUsers(pageable)
         );
 
-        verify(userSortValidator).validate(pageable.getSort());
+        verify(userSortValidator)
+                .validate(pageable.getSort());
 
         verify(userRepository, never())
                 .findAll(any(Pageable.class));
     }
+
+
+    // --------------------------------------------------
+    // SEARCH
+    // --------------------------------------------------
 
     @Test
     void searchUsers_shouldPassSearchAndPageableToRepository() {
@@ -334,27 +428,37 @@ public class UserServiceImplTest {
         Page<User> userPage =
                 new PageImpl<>(List.of(user));
 
-        when(userRepository.searchUsers("gmail", pageable))
+        when(userRepository.searchUsers(
+                "gmail",
+                pageable
+        ))
                 .thenReturn(userPage);
 
         when(userMapper.toResponse(user))
                 .thenReturn(userResponse);
 
         Page<UserResponse> result =
-                userService.searchUsers("gmail", pageable);
+                userService.searchUsers(
+                        "gmail",
+                        pageable
+                );
 
         assertNotNull(result);
-        assertEquals(1, result.getContent().size());
+        assertEquals(
+                1,
+                result.getContent().size()
+        );
 
         verify(userSortValidator)
                 .validate(pageable.getSort());
 
         verify(userRepository)
-                .searchUsers("gmail", pageable);
+                .searchUsers(
+                        "gmail",
+                        pageable
+                );
 
         verify(userMapper)
                 .toResponse(user);
     }
-
-
 }

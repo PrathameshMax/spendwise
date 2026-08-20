@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prathmesh.spendwise.userservice.UserService;
 import com.prathmesh.spendwise.userservice.dto.request.UserRequest;
 import com.prathmesh.spendwise.userservice.dto.response.UserResponse;
+import com.prathmesh.spendwise.userservice.exception.DuplicateEmailException;
 import com.prathmesh.spendwise.userservice.exception.InvalidSortFieldException;
 import com.prathmesh.spendwise.userservice.exception.ResourceNotFoundException;
 import org.junit.jupiter.api.Test;
@@ -20,11 +21,11 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+
 import org.springframework.data.jpa.mapping.JpaMetamodelMappingContext;
 import static org.hamcrest.Matchers.containsString;
 
 import org.mockito.ArgumentCaptor;
-import org.springframework.data.domain.Sort;
 
 @WebMvcTest(UserController.class)
 public class UserControllerTest {
@@ -71,7 +72,10 @@ public class UserControllerTest {
                                 .content(objectMapper.writeValueAsString(request))
                 )
                 .andExpect(status().isCreated())
-                .andExpect(header().string("Location", containsString("/api/v1/users")))
+                .andExpect(header().string(
+                        "Location",
+                        containsString("/api/v1/users")
+                ))
                 .andExpect(jsonPath("$.id").value(1))
                 .andExpect(jsonPath("$.firstName").value("Prathamesh"))
                 .andExpect(jsonPath("$.email").value("prathamesh@gmail.com"));
@@ -229,35 +233,92 @@ public class UserControllerTest {
                 .createUser(any(UserRequest.class));
     }
 
+
     @Test
-    void createUser_shouldReturnBadRequestWhenValidationFails() throws Exception {
+    void createUser_shouldReturnBadRequestWhenValidationFails()
+            throws Exception {
 
         UserRequest request = new UserRequest();
+
         request.setFirstName("");
         request.setLastName("");
         request.setEmail("invalid-email");
         request.setPhone("");
 
-        mockMvc.perform(post("/api/v1/users")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(request)))
+        mockMvc.perform(
+                        post("/api/v1/users")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(objectMapper.writeValueAsString(request))
+                )
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.status").value(400));
     }
 
+
+    // --------------------------------------------------
+    // DUPLICATE EMAIL
+    // --------------------------------------------------
+
     @Test
-    void getUserById_shouldReturnNotFoundWhenUserDoesNotExist() throws Exception {
+    void createUser_shouldReturn409WhenEmailAlreadyExists()
+            throws Exception {
+
+        when(userService.createUser(any(UserRequest.class)))
+                .thenThrow(
+                        new DuplicateEmailException(
+                                "User with email 'duplicate@gmail.com' already exists"
+                        )
+                );
+
+        mockMvc.perform(
+                        post("/api/v1/users")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("""
+                                    {
+                                      "firstName": "Prathamesh",
+                                      "lastName": "Padavekar",
+                                      "email": "duplicate@gmail.com",
+                                      "phone": "9876543210"
+                                    }
+                                    """)
+                )
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.status").value(409))
+                .andExpect(jsonPath("$.message")
+                        .value(
+                                "User with email 'duplicate@gmail.com' already exists"
+                        ));
+    }
+
+
+    // --------------------------------------------------
+    // NOT FOUND
+    // --------------------------------------------------
+
+    @Test
+    void getUserById_shouldReturnNotFoundWhenUserDoesNotExist()
+            throws Exception {
 
         when(userService.getUserById(99L))
-                .thenThrow(new ResourceNotFoundException("User not found"));
+                .thenThrow(
+                        new ResourceNotFoundException("User not found")
+                );
 
-        mockMvc.perform(get("/api/v1/users/99"))
+        mockMvc.perform(
+                        get("/api/v1/users/99")
+                )
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.status").value(404));
     }
 
+
+    // --------------------------------------------------
+    // DEFAULT PAGINATION
+    // --------------------------------------------------
+
     @Test
-    void getAllUsers_shouldUseDefaultPagination() throws Exception {
+    void getAllUsers_shouldUseDefaultPagination()
+            throws Exception {
 
         UserResponse response = new UserResponse();
         response.setId(1L);
@@ -269,14 +330,17 @@ public class UserControllerTest {
         when(userService.getAllUsers(any(Pageable.class)))
                 .thenReturn(page);
 
-        mockMvc.perform(get("/api/v1/users"))
+        mockMvc.perform(
+                        get("/api/v1/users")
+                )
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content").isArray());
 
         ArgumentCaptor<Pageable> pageableCaptor =
                 ArgumentCaptor.forClass(Pageable.class);
 
-        verify(userService).getAllUsers(pageableCaptor.capture());
+        verify(userService)
+                .getAllUsers(pageableCaptor.capture());
 
         Pageable pageable = pageableCaptor.getValue();
 
@@ -284,8 +348,14 @@ public class UserControllerTest {
         assertEquals(10, pageable.getPageSize());
     }
 
+
+    // --------------------------------------------------
+    // MAXIMUM PAGE SIZE
+    // --------------------------------------------------
+
     @Test
-    void getAllUsers_shouldLimitMaximumPageSize() throws Exception {
+    void getAllUsers_shouldLimitMaximumPageSize()
+            throws Exception {
 
         Page<UserResponse> page =
                 new PageImpl<>(List.of());
@@ -293,23 +363,32 @@ public class UserControllerTest {
         when(userService.getAllUsers(any(Pageable.class)))
                 .thenReturn(page);
 
-        mockMvc.perform(get("/api/v1/users")
-                        .param("page", "0")
-                        .param("size", "1000"))
+        mockMvc.perform(
+                        get("/api/v1/users")
+                                .param("page", "0")
+                                .param("size", "1000")
+                )
                 .andExpect(status().isOk());
 
         ArgumentCaptor<Pageable> pageableCaptor =
                 ArgumentCaptor.forClass(Pageable.class);
 
-        verify(userService).getAllUsers(pageableCaptor.capture());
+        verify(userService)
+                .getAllUsers(pageableCaptor.capture());
 
         Pageable pageable = pageableCaptor.getValue();
 
         assertEquals(50, pageable.getPageSize());
     }
 
+
+    // --------------------------------------------------
+    // SORTING
+    // --------------------------------------------------
+
     @Test
-    void getAllUsers_shouldAcceptSorting() throws Exception {
+    void getAllUsers_shouldAcceptSorting()
+            throws Exception {
 
         Page<UserResponse> page =
                 new PageImpl<>(List.of());
@@ -317,16 +396,19 @@ public class UserControllerTest {
         when(userService.getAllUsers(any(Pageable.class)))
                 .thenReturn(page);
 
-        mockMvc.perform(get("/api/v1/users")
-                        .param("page", "0")
-                        .param("size", "10")
-                        .param("sort", "firstName,asc"))
+        mockMvc.perform(
+                        get("/api/v1/users")
+                                .param("page", "0")
+                                .param("size", "10")
+                                .param("sort", "firstName,asc")
+                )
                 .andExpect(status().isOk());
 
         ArgumentCaptor<Pageable> pageableCaptor =
                 ArgumentCaptor.forClass(Pageable.class);
 
-        verify(userService).getAllUsers(pageableCaptor.capture());
+        verify(userService)
+                .getAllUsers(pageableCaptor.capture());
 
         Pageable pageable = pageableCaptor.getValue();
 
@@ -334,18 +416,26 @@ public class UserControllerTest {
         assertEquals(10, pageable.getPageSize());
 
         assertTrue(pageable.getSort().isSorted());
+
         assertEquals(
                 "firstName",
-                pageable.getSort().getOrderFor("firstName").getProperty()
+                pageable.getSort()
+                        .getOrderFor("firstName")
+                        .getProperty()
         );
+
         assertEquals(
                 Sort.Direction.ASC,
-                pageable.getSort().getOrderFor("firstName").getDirection()
+                pageable.getSort()
+                        .getOrderFor("firstName")
+                        .getDirection()
         );
     }
 
+
     @Test
-    void getAllUsers_shouldSupportDescendingSorting() throws Exception {
+    void getAllUsers_shouldSupportDescendingSorting()
+            throws Exception {
 
         Page<UserResponse> page =
                 new PageImpl<>(List.of());
@@ -353,14 +443,17 @@ public class UserControllerTest {
         when(userService.getAllUsers(any(Pageable.class)))
                 .thenReturn(page);
 
-        mockMvc.perform(get("/api/v1/users")
-                        .param("sort", "createdAt,desc"))
+        mockMvc.perform(
+                        get("/api/v1/users")
+                                .param("sort", "createdAt,desc")
+                )
                 .andExpect(status().isOk());
 
         ArgumentCaptor<Pageable> pageableCaptor =
                 ArgumentCaptor.forClass(Pageable.class);
 
-        verify(userService).getAllUsers(pageableCaptor.capture());
+        verify(userService)
+                .getAllUsers(pageableCaptor.capture());
 
         Pageable pageable = pageableCaptor.getValue();
 
@@ -371,8 +464,16 @@ public class UserControllerTest {
 
         assertNotNull(order);
         assertEquals("createdAt", order.getProperty());
-        assertEquals(Sort.Direction.DESC, order.getDirection());
+        assertEquals(
+                Sort.Direction.DESC,
+                order.getDirection()
+        );
     }
+
+
+    // --------------------------------------------------
+    // SEARCH + PAGINATION + SORTING
+    // --------------------------------------------------
 
     @Test
     void getAllUsers_shouldSupportSearchPaginationAndSorting()
@@ -403,11 +504,13 @@ public class UserControllerTest {
                 any(Pageable.class)
         )).thenReturn(page);
 
-        mockMvc.perform(get("/api/v1/users")
-                        .param("search", "gmail")
-                        .param("page", "0")
-                        .param("size", "2")
-                        .param("sort", "createdAt,desc"))
+        mockMvc.perform(
+                        get("/api/v1/users")
+                                .param("search", "gmail")
+                                .param("page", "0")
+                                .param("size", "2")
+                                .param("sort", "createdAt,desc")
+                )
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content").isArray())
                 .andExpect(jsonPath("$.content.length()").value(1))
@@ -416,6 +519,7 @@ public class UserControllerTest {
                 .andExpect(jsonPath("$.number").value(0))
                 .andExpect(jsonPath("$.size").value(2));
     }
+
 
     @Test
     void getAllUsers_shouldRejectInvalidSortWhenSearching()
@@ -430,19 +534,29 @@ public class UserControllerTest {
                 )
         );
 
-        mockMvc.perform(get("/api/v1/users")
-                        .param("search", "gmail")
-                        .param("page", "0")
-                        .param("size", "2")
-                        .param("sort", "password,desc"))
+        mockMvc.perform(
+                        get("/api/v1/users")
+                                .param("search", "gmail")
+                                .param("page", "0")
+                                .param("size", "2")
+                                .param("sort", "password,desc")
+                )
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.status").value(400))
                 .andExpect(jsonPath("$.message")
-                        .value("Sorting by field 'password' is not allowed"));
+                        .value(
+                                "Sorting by field 'password' is not allowed"
+                        ));
     }
 
+
+    // --------------------------------------------------
+    // SEARCH EDGE CASES
+    // --------------------------------------------------
+
     @Test
-    void getAllUsers_shouldIgnoreEmptySearch() throws Exception {
+    void getAllUsers_shouldIgnoreEmptySearch()
+            throws Exception {
 
         UserResponse response = new UserResponse();
 
@@ -461,20 +575,26 @@ public class UserControllerTest {
         when(userService.getAllUsers(any(Pageable.class)))
                 .thenReturn(page);
 
-        mockMvc.perform(get("/api/v1/users")
-                        .param("search", ""))
+        mockMvc.perform(
+                        get("/api/v1/users")
+                                .param("search", "")
+                )
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content").isArray())
                 .andExpect(jsonPath("$.content.length()").value(1));
 
-        verify(userService).getAllUsers(any(Pageable.class));
+        verify(userService)
+                .getAllUsers(any(Pageable.class));
 
         verify(userService, never())
                 .searchUsers(anyString(), any(Pageable.class));
     }
 
+
     @Test
-    void getAllUsers_shouldIgnoreWhitespaceSearch() throws Exception {
+    void getAllUsers_shouldIgnoreWhitespaceSearch()
+            throws Exception {
+
         UserResponse response = new UserResponse();
 
         response.setId(1L);
@@ -492,20 +612,26 @@ public class UserControllerTest {
         when(userService.getAllUsers(any(Pageable.class)))
                 .thenReturn(page);
 
-        mockMvc.perform(get("/api/v1/users")
-                        .param("search", "   "))
+        mockMvc.perform(
+                        get("/api/v1/users")
+                                .param("search", "   ")
+                )
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content").isArray())
                 .andExpect(jsonPath("$.content.length()").value(1));
 
-        verify(userService).getAllUsers(any(Pageable.class));
+        verify(userService)
+                .getAllUsers(any(Pageable.class));
 
         verify(userService, never())
                 .searchUsers(anyString(), any(Pageable.class));
     }
 
+
     @Test
-    void getAllUsers_shouldTrimSearchValue() throws Exception {
+    void getAllUsers_shouldTrimSearchValue()
+            throws Exception {
+
         UserResponse response = new UserResponse();
 
         response.setId(1L);
@@ -525,15 +651,19 @@ public class UserControllerTest {
                 any(Pageable.class)
         )).thenReturn(page);
 
-        mockMvc.perform(get("/api/v1/users")
-                        .param("search", "  Prathamesh  "))
+        mockMvc.perform(
+                        get("/api/v1/users")
+                                .param("search", "  Prathamesh  ")
+                )
                 .andExpect(status().isOk());
 
-        verify(userService).searchUsers(
-                eq("Prathamesh"),
-                any(Pageable.class)
-        );
+        verify(userService)
+                .searchUsers(
+                        eq("Prathamesh"),
+                        any(Pageable.class)
+                );
     }
+
 
     @Test
     void getAllUsers_shouldReturnEmptyPageWhenSearchHasNoMatch()
@@ -551,16 +681,24 @@ public class UserControllerTest {
                 any(Pageable.class)
         )).thenReturn(emptyPage);
 
-        mockMvc.perform(get("/api/v1/users")
-                        .param("search", "xyz123"))
+        mockMvc.perform(
+                        get("/api/v1/users")
+                                .param("search", "xyz123")
+                )
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content").isArray())
                 .andExpect(jsonPath("$.content").isEmpty())
                 .andExpect(jsonPath("$.totalElements").value(0));
     }
 
+
+    // --------------------------------------------------
+    // PAGEABLE VERIFICATION
+    // --------------------------------------------------
+
     @Test
-    void getAllUsers_shouldBuildCorrectPageable() throws Exception {
+    void getAllUsers_shouldBuildCorrectPageable()
+            throws Exception {
 
         UserResponse response = new UserResponse();
 
@@ -568,6 +706,7 @@ public class UserControllerTest {
         response.setFirstName("Prathamesh");
         response.setLastName("Padavekar");
         response.setEmail("prathamesh@gmail.com");
+
         Page<UserResponse> page =
                 new PageImpl<>(
                         List.of(response),
@@ -582,18 +721,19 @@ public class UserControllerTest {
         when(userService.getAllUsers(any(Pageable.class)))
                 .thenReturn(page);
 
-        mockMvc.perform(get("/api/v1/users")
-                        .param("page", "1")
-                        .param("size", "2")
-                        .param("sort", "createdAt,desc"))
+        mockMvc.perform(
+                        get("/api/v1/users")
+                                .param("page", "1")
+                                .param("size", "2")
+                                .param("sort", "createdAt,desc")
+                )
                 .andExpect(status().isOk());
 
         ArgumentCaptor<Pageable> pageableCaptor =
                 ArgumentCaptor.forClass(Pageable.class);
 
-        verify(userService).getAllUsers(
-                pageableCaptor.capture()
-        );
+        verify(userService)
+                .getAllUsers(pageableCaptor.capture());
 
         Pageable pageable = pageableCaptor.getValue();
 
@@ -604,18 +744,24 @@ public class UserControllerTest {
                 pageable.getSort().getOrderFor("createdAt");
 
         assertNotNull(order);
-        assertEquals(Sort.Direction.DESC, order.getDirection());
+        assertEquals(
+                Sort.Direction.DESC,
+                order.getDirection()
+        );
     }
+
 
     @Test
     void getAllUsers_shouldPassSearchAndPageableToService()
             throws Exception {
+
         UserResponse response = new UserResponse();
 
         response.setId(1L);
         response.setFirstName("Prathamesh");
         response.setLastName("Padavekar");
         response.setEmail("prathamesh@gmail.com");
+
         Page<UserResponse> page =
                 new PageImpl<>(
                         List.of(response),
@@ -632,11 +778,13 @@ public class UserControllerTest {
                 any(Pageable.class)
         )).thenReturn(page);
 
-        mockMvc.perform(get("/api/v1/users")
-                        .param("search", "gmail")
-                        .param("page", "0")
-                        .param("size", "2")
-                        .param("sort", "createdAt,desc"))
+        mockMvc.perform(
+                        get("/api/v1/users")
+                                .param("search", "gmail")
+                                .param("page", "0")
+                                .param("size", "2")
+                                .param("sort", "createdAt,desc")
+                )
                 .andExpect(status().isOk());
 
         ArgumentCaptor<Pageable> pageableCaptor =
@@ -656,6 +804,9 @@ public class UserControllerTest {
                 pageable.getSort().getOrderFor("createdAt");
 
         assertNotNull(order);
-        assertEquals(Sort.Direction.DESC, order.getDirection());
+        assertEquals(
+                Sort.Direction.DESC,
+                order.getDirection()
+        );
     }
 }

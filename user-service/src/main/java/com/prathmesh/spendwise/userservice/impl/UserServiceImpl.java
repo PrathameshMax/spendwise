@@ -1,20 +1,18 @@
 package com.prathmesh.spendwise.userservice.impl;
 
+import com.prathmesh.spendwise.userservice.UserService;
 import com.prathmesh.spendwise.userservice.dto.request.UserRequest;
 import com.prathmesh.spendwise.userservice.dto.response.UserResponse;
 import com.prathmesh.spendwise.userservice.entity.User;
+import com.prathmesh.spendwise.userservice.exception.DuplicateEmailException;
 import com.prathmesh.spendwise.userservice.exception.ResourceNotFoundException;
 import com.prathmesh.spendwise.userservice.mapper.UserMapper;
 import com.prathmesh.spendwise.userservice.repository.UserRepository;
-import com.prathmesh.spendwise.userservice.UserService;
 import com.prathmesh.spendwise.userservice.validation.UserSortValidator;
-import org.springframework.stereotype.Service;
-
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import org.springframework.stereotype.Service;
 
 @Service
 public class UserServiceImpl implements UserService {
@@ -23,10 +21,11 @@ public class UserServiceImpl implements UserService {
     private final UserMapper userMapper;
     private final UserSortValidator userSortValidator;
 
-    private final Map<Long, User> users = new HashMap<>();
-    private Long idCounter = 1L;
+    public UserServiceImpl(
+            UserRepository userRepository,
+            UserMapper userMapper,
+            UserSortValidator userSortValidator) {
 
-    public UserServiceImpl(UserRepository userRepository, UserMapper userMapper, UserSortValidator userSortValidator) {
         this.userRepository = userRepository;
         this.userMapper = userMapper;
         this.userSortValidator = userSortValidator;
@@ -37,9 +36,18 @@ public class UserServiceImpl implements UserService {
 
         User user = userMapper.toEntity(request);
 
-        User savedUser = userRepository.save(user);
+        try {
+            User savedUser = userRepository.saveAndFlush(user);
 
-        return mapToResponse(savedUser);
+            return mapToResponse(savedUser);
+
+        } catch (DataIntegrityViolationException ex) {
+
+            throw new DuplicateEmailException(
+                    "User with email '" + request.getEmail()
+                            + "' already exists"
+            );
+        }
     }
 
     @Override
@@ -52,7 +60,9 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public Page<UserResponse> searchUsers(String search, Pageable pageable) {
+    public Page<UserResponse> searchUsers(
+            String search,
+            Pageable pageable) {
 
         userSortValidator.validate(pageable.getSort());
 
@@ -65,17 +75,23 @@ public class UserServiceImpl implements UserService {
 
         User user = userRepository.findById(id)
                 .orElseThrow(() ->
-                        new ResourceNotFoundException("User not found with Id : "+id));
+                        new ResourceNotFoundException(
+                                "User not found with Id : " + id
+                        ));
 
         return mapToResponse(user);
     }
 
     @Override
-    public UserResponse updateUser(Long id, UserRequest request) {
+    public UserResponse updateUser(
+            Long id,
+            UserRequest request) {
 
         User user = userRepository.findById(id)
                 .orElseThrow(() ->
-                        new ResourceNotFoundException("User not found with Id : "+id)
+                        new ResourceNotFoundException(
+                                "User not found with Id : " + id
+                        )
                 );
 
         user.setFirstName(request.getFirstName());
@@ -91,8 +107,10 @@ public class UserServiceImpl implements UserService {
     @Override
     public void deleteUser(Long id) {
 
-        if (!userRepository.existsById(id)){
-            throw new ResourceNotFoundException("User not found with Id : "+id);
+        if (!userRepository.existsById(id)) {
+            throw new ResourceNotFoundException(
+                    "User not found with Id : " + id
+            );
         }
 
         userRepository.deleteById(id);
