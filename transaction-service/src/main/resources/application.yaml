@@ -21,3 +21,17 @@ spring:
 
   flyway:
     enabled: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, metrics
+  endpoint:
+    health:
+      group:
+        readiness:
+          include: readinessState,db
+      show-details: when_authorized
+      probes:
+        enabled: true
