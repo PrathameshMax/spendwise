@@ -20,6 +20,7 @@
     <packaging>pom</packaging>
     <modules>
         <module>user-service</module>
+        <module>transaction-service</module>
     </modules>
 
 
