@@ -1,13 +1,18 @@
 package com.prathmesh.spendwise.transactionservice.service;
 
+import com.prathmesh.spendwise.transactionservice.client.UserServiceClient;
 import com.prathmesh.spendwise.transactionservice.dto.request.TransactionRequest;
 import com.prathmesh.spendwise.transactionservice.dto.response.TransactionResponse;
+import com.prathmesh.spendwise.transactionservice.dto.response.UserResponse;
 import com.prathmesh.spendwise.transactionservice.entity.Transaction;
 import com.prathmesh.spendwise.transactionservice.entity.TransactionType;
 import com.prathmesh.spendwise.transactionservice.exception.TransactionNotFoundException;
 import com.prathmesh.spendwise.transactionservice.repository.TransactionRepository;
 import com.prathmesh.spendwise.transactionservice.service.impl.TransactionServiceImpl;
 
+import feign.FeignException;
+import feign.Request;
+import feign.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -22,7 +27,9 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 
@@ -39,9 +46,13 @@ public class TransactionServiceImplTest {
         @InjectMocks
         private TransactionServiceImpl transactionService;
 
+        @Mock
+        private UserServiceClient userServiceClient;
+
         private Transaction transaction;
         private TransactionRequest request;
         private TransactionResponse response;
+        private UserResponse userResponse;
 
         @BeforeEach
         void setUp() {
@@ -98,6 +109,8 @@ public class TransactionServiceImplTest {
             response.setUpdatedAt(
                     transaction.getUpdatedAt()
             );
+            userResponse = new UserResponse();
+            userResponse.setId(100L);
         }
 
 
@@ -110,6 +123,9 @@ public class TransactionServiceImplTest {
 
             when(transactionRepository.save(any(Transaction.class)))
                     .thenReturn(transaction);
+
+            when(userServiceClient.getUserById(request.getUserId()))
+                    .thenReturn(userResponse);
 
             TransactionResponse result =
                     transactionService.createTransaction(request);
@@ -136,6 +152,8 @@ public class TransactionServiceImplTest {
 
             verify(transactionRepository)
                     .save(any(Transaction.class));
+            verify(userServiceClient)
+                    .getUserById(request.getUserId());
         }
 
 
@@ -619,5 +637,25 @@ public class TransactionServiceImplTest {
 
         verify(transactionRepository, never())
                 .deleteById(1L);
+    }
+
+
+    @Test
+    void createTransaction_shouldNotSaveWhenUserServiceFails() {
+
+        RuntimeException exception =
+                new RuntimeException("User Service unavailable");
+
+        when(userServiceClient.getUserById(request.getUserId()))
+                .thenThrow(exception);
+
+        assertThrows(
+                RuntimeException.class,
+                () -> transactionService.createTransaction(request)
+        );
+
+        verify(transactionRepository, never())
+                .save(any(Transaction.class));
+
     }
 }

@@ -33,3 +33,11 @@ spring:
    enabled: true
    baseline-on-migrate: true
    baseline-version: 1
+
+logging:
+  level:
+    root: INFO
+    com.prathmesh.spendwise.userservice: INFO
+
+  pattern:
+    console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %-5level [%X{requestId}] %logger{36} : %msg%n"

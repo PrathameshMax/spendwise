@@ -9,13 +9,18 @@ import com.prathmesh.spendwise.userservice.exception.ResourceNotFoundException;
 import com.prathmesh.spendwise.userservice.mapper.UserMapper;
 import com.prathmesh.spendwise.userservice.repository.UserRepository;
 import com.prathmesh.spendwise.userservice.validation.UserSortValidator;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class UserServiceImpl implements UserService {
+
+    private static final Logger log = LoggerFactory.getLogger(UserServiceImpl.class);
 
     private final UserRepository userRepository;
     private final UserMapper userMapper;
@@ -34,11 +39,16 @@ public class UserServiceImpl implements UserService {
     @Override
     public UserResponse createUser(UserRequest request) {
 
+        log.info("Creating user, email={}", request.getEmail());
+
         User user = userMapper.toEntity(request);
 
         try {
             User savedUser = userRepository.saveAndFlush(user);
-
+            log.info(
+                    "User created successfully, userId={}",
+                    savedUser.getId()
+            );
             return mapToResponse(savedUser);
 
         } catch (DataIntegrityViolationException ex) {
@@ -71,13 +81,19 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public UserResponse getUserById(Long id) {
 
+        log.info("Fetching user, userId={}", id);
+
         User user = userRepository.findById(id)
-                .orElseThrow(() ->
-                        new ResourceNotFoundException(
-                                "User not found with Id : " + id
-                        ));
+                .orElseThrow(() -> {
+                    log.warn("User not found, userId={}", id);
+
+                    return new ResourceNotFoundException(
+                            "User not found with Id : " + id
+                    );
+                });
 
         return mapToResponse(user);
     }
