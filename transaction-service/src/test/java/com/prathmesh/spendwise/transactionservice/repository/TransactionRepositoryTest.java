@@ -628,4 +628,57 @@ public class TransactionRepositoryTest {
         );
     }
 
+
+    @Test
+    void findByUserIdAndType_shouldReturnOnlyMatchingTransactions() {
+
+        Transaction expense1 = createTransaction(
+                1L,
+                "1000.00",
+                TransactionType.EXPENSE,
+                "Food",
+                "Food 1"
+        );
+
+        Transaction expense2 = createTransaction(
+                1L,
+                "2000.00",
+                TransactionType.EXPENSE,
+                "Travel",
+                "Travel"
+        );
+
+        Transaction income = createTransaction(
+                1L,
+                "5000.00",
+                TransactionType.INCOME,
+                "Salary",
+                "Salary"
+        );
+
+        transactionRepository.saveAllAndFlush(
+                List.of(
+                        expense1,
+                        expense2,
+                        income
+                )
+        );
+
+        List<Transaction> result =
+                transactionRepository.findByUserIdAndType(
+                        1L,
+                        TransactionType.EXPENSE
+                );
+
+        assertEquals(2, result.size());
+
+        assertTrue(
+                result.stream()
+                        .allMatch(
+                                transaction ->
+                                        transaction.getType()
+                                                == TransactionType.EXPENSE
+                        )
+        );
+    }
 }

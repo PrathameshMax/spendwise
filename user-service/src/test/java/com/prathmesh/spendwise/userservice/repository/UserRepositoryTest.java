@@ -391,4 +391,5 @@ public class UserRepositoryTest {
 
         return userRepository.saveAndFlush(user);
     }
+
 }

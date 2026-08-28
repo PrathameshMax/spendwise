@@ -2,6 +2,7 @@ package com.prathmesh.spendwise.userservice.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prathmesh.spendwise.userservice.UserService;
+import com.prathmesh.spendwise.userservice.config.SecurityConfig;
 import com.prathmesh.spendwise.userservice.dto.request.UserRequest;
 import com.prathmesh.spendwise.userservice.dto.response.UserResponse;
 import com.prathmesh.spendwise.userservice.exception.DuplicateEmailException;
@@ -10,6 +11,7 @@ import com.prathmesh.spendwise.userservice.exception.ResourceNotFoundException;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.*;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -19,6 +21,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
+import static org.springframework.security.oauth2.jwt.JwtTypeValidator.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -26,8 +29,11 @@ import org.springframework.data.jpa.mapping.JpaMetamodelMappingContext;
 import static org.hamcrest.Matchers.containsString;
 
 import org.mockito.ArgumentCaptor;
+import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors;
+
 
 @WebMvcTest(UserController.class)
+@Import(SecurityConfig.class)
 public class UserControllerTest {
 
     @Autowired
@@ -68,6 +74,7 @@ public class UserControllerTest {
 
         mockMvc.perform(
                         post("/api/v1/users")
+                                .with(SecurityMockMvcRequestPostProcessors.jwt())
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(objectMapper.writeValueAsString(request))
                 )
@@ -106,6 +113,7 @@ public class UserControllerTest {
 
         mockMvc.perform(
                         get("/api/v1/users")
+                                .with(SecurityMockMvcRequestPostProcessors.jwt())
                                 .param("page", "0")
                                 .param("size", "1")
                 )
@@ -137,6 +145,7 @@ public class UserControllerTest {
 
         mockMvc.perform(
                         get("/api/v1/users/1")
+                                .with(SecurityMockMvcRequestPostProcessors.jwt())
                 )
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(1))
@@ -174,6 +183,7 @@ public class UserControllerTest {
 
         mockMvc.perform(
                         put("/api/v1/users/1")
+                                .with(SecurityMockMvcRequestPostProcessors.jwt())
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(objectMapper.writeValueAsString(request))
                 )
@@ -200,6 +210,7 @@ public class UserControllerTest {
 
         mockMvc.perform(
                         delete("/api/v1/users/1")
+                                .with(SecurityMockMvcRequestPostProcessors.jwt())
                 )
                 .andExpect(status().isNoContent())
                 .andExpect(content().string(""));
@@ -224,6 +235,7 @@ public class UserControllerTest {
 
         mockMvc.perform(
                         post("/api/v1/users")
+                                .with(SecurityMockMvcRequestPostProcessors.jwt())
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(objectMapper.writeValueAsString(request))
                 )
@@ -247,6 +259,7 @@ public class UserControllerTest {
 
         mockMvc.perform(
                         post("/api/v1/users")
+                                .with(SecurityMockMvcRequestPostProcessors.jwt())
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(objectMapper.writeValueAsString(request))
                 )
@@ -272,6 +285,7 @@ public class UserControllerTest {
 
         mockMvc.perform(
                         post("/api/v1/users")
+                                .with(SecurityMockMvcRequestPostProcessors.jwt())
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content("""
                                     {
@@ -306,6 +320,7 @@ public class UserControllerTest {
 
         mockMvc.perform(
                         get("/api/v1/users/99")
+                                .with(SecurityMockMvcRequestPostProcessors.jwt())
                 )
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.status").value(404));
@@ -332,6 +347,7 @@ public class UserControllerTest {
 
         mockMvc.perform(
                         get("/api/v1/users")
+                                .with(SecurityMockMvcRequestPostProcessors.jwt())
                 )
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content").isArray());
@@ -365,6 +381,7 @@ public class UserControllerTest {
 
         mockMvc.perform(
                         get("/api/v1/users")
+                                .with(SecurityMockMvcRequestPostProcessors.jwt())
                                 .param("page", "0")
                                 .param("size", "1000")
                 )
@@ -398,6 +415,7 @@ public class UserControllerTest {
 
         mockMvc.perform(
                         get("/api/v1/users")
+                                .with(SecurityMockMvcRequestPostProcessors.jwt())
                                 .param("page", "0")
                                 .param("size", "10")
                                 .param("sort", "firstName,asc")
@@ -445,6 +463,7 @@ public class UserControllerTest {
 
         mockMvc.perform(
                         get("/api/v1/users")
+                                .with(SecurityMockMvcRequestPostProcessors.jwt())
                                 .param("sort", "createdAt,desc")
                 )
                 .andExpect(status().isOk());
@@ -506,6 +525,7 @@ public class UserControllerTest {
 
         mockMvc.perform(
                         get("/api/v1/users")
+                                .with(SecurityMockMvcRequestPostProcessors.jwt())
                                 .param("search", "gmail")
                                 .param("page", "0")
                                 .param("size", "2")
@@ -536,6 +556,7 @@ public class UserControllerTest {
 
         mockMvc.perform(
                         get("/api/v1/users")
+                                .with(SecurityMockMvcRequestPostProcessors.jwt())
                                 .param("search", "gmail")
                                 .param("page", "0")
                                 .param("size", "2")
@@ -577,6 +598,7 @@ public class UserControllerTest {
 
         mockMvc.perform(
                         get("/api/v1/users")
+                                .with(SecurityMockMvcRequestPostProcessors.jwt())
                                 .param("search", "")
                 )
                 .andExpect(status().isOk())
@@ -614,6 +636,7 @@ public class UserControllerTest {
 
         mockMvc.perform(
                         get("/api/v1/users")
+                                .with(SecurityMockMvcRequestPostProcessors.jwt())
                                 .param("search", "   ")
                 )
                 .andExpect(status().isOk())
@@ -653,6 +676,7 @@ public class UserControllerTest {
 
         mockMvc.perform(
                         get("/api/v1/users")
+                                .with(SecurityMockMvcRequestPostProcessors.jwt())
                                 .param("search", "  Prathamesh  ")
                 )
                 .andExpect(status().isOk());
@@ -683,6 +707,7 @@ public class UserControllerTest {
 
         mockMvc.perform(
                         get("/api/v1/users")
+                                .with(SecurityMockMvcRequestPostProcessors.jwt())
                                 .param("search", "xyz123")
                 )
                 .andExpect(status().isOk())
@@ -723,6 +748,7 @@ public class UserControllerTest {
 
         mockMvc.perform(
                         get("/api/v1/users")
+                                .with(SecurityMockMvcRequestPostProcessors.jwt())
                                 .param("page", "1")
                                 .param("size", "2")
                                 .param("sort", "createdAt,desc")
@@ -780,6 +806,7 @@ public class UserControllerTest {
 
         mockMvc.perform(
                         get("/api/v1/users")
+                                .with(SecurityMockMvcRequestPostProcessors.jwt())
                                 .param("search", "gmail")
                                 .param("page", "0")
                                 .param("size", "2")
