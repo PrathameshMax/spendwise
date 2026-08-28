@@ -2,6 +2,7 @@ package com.prathmesh.spendwise.transactionservice.controller;
 
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.prathmesh.spendwise.transactionservice.config.SecurityConfig;
 import com.prathmesh.spendwise.transactionservice.dto.request.TransactionRequest;
 import com.prathmesh.spendwise.transactionservice.dto.response.TransactionResponse;
 import com.prathmesh.spendwise.transactionservice.entity.TransactionType;
@@ -27,8 +28,10 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors;
 
 @WebMvcTest(TransactionController.class)
+@Import(SecurityConfig.class)
 public class TransactionControllerTest {
 
     @Autowired
@@ -62,6 +65,7 @@ public class TransactionControllerTest {
 
         mockMvc.perform(
                         post("/api/v1/transactions")
+                                .with(SecurityMockMvcRequestPostProcessors.jwt())
                                 .contentType(
                                         MediaType.APPLICATION_JSON
                                 )
@@ -116,6 +120,7 @@ public class TransactionControllerTest {
 
         mockMvc.perform(
                         post("/api/v1/transactions")
+                                .with(SecurityMockMvcRequestPostProcessors.jwt())
                                 .contentType(
                                         MediaType.APPLICATION_JSON
                                 )
@@ -162,6 +167,7 @@ public class TransactionControllerTest {
 
         mockMvc.perform(
                         get("/api/v1/transactions")
+                                .with(SecurityMockMvcRequestPostProcessors.jwt())
                                 .param(
                                         "userId",
                                         "100"
@@ -231,6 +237,7 @@ public class TransactionControllerTest {
 
         mockMvc.perform(
                         get("/api/v1/transactions")
+                                .with(SecurityMockMvcRequestPostProcessors.jwt())
                                 .param(
                                         "userId",
                                         "100"
@@ -287,6 +294,7 @@ public class TransactionControllerTest {
 
         mockMvc.perform(
                         get("/api/v1/transactions/1")
+                                .with(SecurityMockMvcRequestPostProcessors.jwt())
                 )
                 .andExpect(status().isOk())
                 .andExpect(
@@ -325,6 +333,7 @@ public class TransactionControllerTest {
 
         mockMvc.perform(
                         get("/api/v1/transactions/99")
+                                .with(SecurityMockMvcRequestPostProcessors.jwt())
                 )
                 .andExpect(status().isNotFound());
 
@@ -361,6 +370,7 @@ public class TransactionControllerTest {
 
         mockMvc.perform(
                         put("/api/v1/transactions/1")
+                                .with(SecurityMockMvcRequestPostProcessors.jwt())
                                 .contentType(
                                         MediaType.APPLICATION_JSON
                                 )
@@ -406,6 +416,7 @@ public class TransactionControllerTest {
 
         mockMvc.perform(
                         delete("/api/v1/transactions/1")
+                                .with(SecurityMockMvcRequestPostProcessors.jwt())
                 )
                 .andExpect(status().isNoContent());
 
@@ -437,6 +448,7 @@ public class TransactionControllerTest {
 
         mockMvc.perform(
                         get("/api/v1/transactions/type")
+                                .with(SecurityMockMvcRequestPostProcessors.jwt())
                                 .param(
                                         "userId",
                                         "100"
@@ -482,6 +494,7 @@ public class TransactionControllerTest {
 
         mockMvc.perform(
                         get("/api/v1/transactions/type")
+                                .with(SecurityMockMvcRequestPostProcessors.jwt())
                                 .param(
                                         "userId",
                                         "100"
@@ -513,6 +526,7 @@ public class TransactionControllerTest {
 
         mockMvc.perform(
                         post("/api/v1/transactions")
+                                .with(SecurityMockMvcRequestPostProcessors.jwt())
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(
                                         objectMapper.writeValueAsString(request)
@@ -535,6 +549,7 @@ public class TransactionControllerTest {
 
         mockMvc.perform(
                         post("/api/v1/transactions")
+                                .with(SecurityMockMvcRequestPostProcessors.jwt())
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(
                                         objectMapper.writeValueAsString(request)
@@ -557,6 +572,7 @@ public class TransactionControllerTest {
 
         mockMvc.perform(
                         post("/api/v1/transactions")
+                                .with(SecurityMockMvcRequestPostProcessors.jwt())
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(
                                         objectMapper.writeValueAsString(request)
@@ -579,6 +595,7 @@ public class TransactionControllerTest {
 
         mockMvc.perform(
                         post("/api/v1/transactions")
+                                .with(SecurityMockMvcRequestPostProcessors.jwt())
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(
                                         objectMapper.writeValueAsString(request)
@@ -601,6 +618,7 @@ public class TransactionControllerTest {
 
         mockMvc.perform(
                         post("/api/v1/transactions")
+                                .with(SecurityMockMvcRequestPostProcessors.jwt())
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(
                                         objectMapper.writeValueAsString(request)
@@ -623,6 +641,7 @@ public class TransactionControllerTest {
 
         mockMvc.perform(
                         post("/api/v1/transactions")
+                                .with(SecurityMockMvcRequestPostProcessors.jwt())
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(
                                         objectMapper.writeValueAsString(request)
@@ -650,6 +669,7 @@ public class TransactionControllerTest {
 
         mockMvc.perform(
                         put("/api/v1/transactions/1")
+                                .with(SecurityMockMvcRequestPostProcessors.jwt())
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(
                                         objectMapper.writeValueAsString(request)
@@ -685,6 +705,7 @@ public class TransactionControllerTest {
 
         mockMvc.perform(
                         put("/api/v1/transactions/99")
+                                .with(SecurityMockMvcRequestPostProcessors.jwt())
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(
                                         objectMapper.writeValueAsString(request)
@@ -723,6 +744,7 @@ public class TransactionControllerTest {
 
         mockMvc.perform(
                         delete("/api/v1/transactions/99")
+                                .with(SecurityMockMvcRequestPostProcessors.jwt())
                 )
                 .andExpect(status().isNotFound())
                 .andExpect(
@@ -796,6 +818,7 @@ public class TransactionControllerTest {
 
         mockMvc.perform(
                         post("/api/v1/transactions")
+                                .with(SecurityMockMvcRequestPostProcessors.jwt())
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content("""
                                 {
@@ -837,6 +860,7 @@ public class TransactionControllerTest {
 
         mockMvc.perform(
                         post("/api/v1/transactions")
+                                .with(SecurityMockMvcRequestPostProcessors.jwt())
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(
                                         objectMapper.writeValueAsString(

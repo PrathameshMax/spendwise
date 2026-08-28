@@ -9,6 +9,12 @@ spring:
         max-page-size: 50
   application:
     name: user-service
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: http://localhost:8080/realms/spendwise
+
 
   datasource:
     url: jdbc:postgresql://localhost:5432/spendwise

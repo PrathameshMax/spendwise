@@ -6,31 +6,32 @@ import com.prathmesh.spendwise.userservice.entity.User;
 import com.prathmesh.spendwise.userservice.exception.DuplicateEmailException;
 import com.prathmesh.spendwise.userservice.exception.InvalidSortFieldException;
 import com.prathmesh.spendwise.userservice.exception.ResourceNotFoundException;
+import com.prathmesh.spendwise.userservice.impl.UserServiceImpl;
 import com.prathmesh.spendwise.userservice.mapper.UserMapper;
 import com.prathmesh.spendwise.userservice.repository.UserRepository;
-import com.prathmesh.spendwise.userservice.impl.UserServiceImpl;
 import com.prathmesh.spendwise.userservice.validation.UserSortValidator;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+
 import org.mockito.junit.jupiter.MockitoExtension;
+
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageImpl;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
-import org.springframework.data.domain.Sort;
+import org.springframework.data.domain.*;
 
 import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
-public class UserServiceImplTest {
+class UserServiceImplTest {
 
     @Mock
     private UserRepository userRepository;
@@ -45,17 +46,17 @@ public class UserServiceImplTest {
     private UserServiceImpl userService;
 
     private User user;
-    private UserRequest userRequest;
-    private UserResponse userResponse;
+    private UserRequest request;
+    private UserResponse response;
 
     @BeforeEach
     void setUp() {
 
-        userRequest = new UserRequest();
-        userRequest.setFirstName("Prathamesh");
-        userRequest.setLastName("Padavekar");
-        userRequest.setEmail("prathamesh@gmail.com");
-        userRequest.setPhone("9876543210");
+        request = new UserRequest();
+        request.setFirstName("Prathamesh");
+        request.setLastName("Padavekar");
+        request.setEmail("prathamesh@gmail.com");
+        request.setPhone("9876543210");
 
         user = new User();
         user.setId(1L);
@@ -64,33 +65,33 @@ public class UserServiceImplTest {
         user.setEmail("prathamesh@gmail.com");
         user.setPhone("9876543210");
 
-        userResponse = new UserResponse();
-        userResponse.setId(1L);
-        userResponse.setFirstName("Prathamesh");
-        userResponse.setLastName("Padavekar");
-        userResponse.setEmail("prathamesh@gmail.com");
-        userResponse.setPhone("9876543210");
+        response = new UserResponse();
+        response.setId(1L);
+        response.setFirstName("Prathamesh");
+        response.setLastName("Padavekar");
+        response.setEmail("prathamesh@gmail.com");
+        response.setPhone("9876543210");
     }
 
 
-    // --------------------------------------------------
+    // =========================================================
     // CREATE
-    // --------------------------------------------------
+    // =========================================================
 
     @Test
     void createUser_shouldCreateUserSuccessfully() {
 
-        when(userMapper.toEntity(userRequest))
+        when(userMapper.toEntity(request))
                 .thenReturn(user);
 
         when(userRepository.saveAndFlush(user))
                 .thenReturn(user);
 
         when(userMapper.toResponse(user))
-                .thenReturn(userResponse);
+                .thenReturn(response);
 
         UserResponse result =
-                userService.createUser(userRequest);
+                userService.createUser(request);
 
         assertNotNull(result);
         assertEquals(1L, result.getId());
@@ -103,34 +104,27 @@ public class UserServiceImplTest {
                 result.getEmail()
         );
 
-        verify(userMapper).toEntity(userRequest);
-        verify(userRepository).saveAndFlush(user);
-        verify(userMapper).toResponse(user);
+        verify(userMapper)
+                .toEntity(request);
+
+        verify(userRepository)
+                .saveAndFlush(user);
+
+        verify(userMapper)
+                .toResponse(user);
     }
 
-
-    // --------------------------------------------------
-    // CREATE - DUPLICATE EMAIL
-    // --------------------------------------------------
 
     @Test
     void createUser_shouldThrowDuplicateEmailException() {
 
-        UserRequest request = new UserRequest();
-        request.setFirstName("Prathamesh");
-        request.setLastName("Padavekar");
-        request.setEmail("duplicate@gmail.com");
-        request.setPhone("9876543210");
-
-        User duplicateUser = new User();
-
         when(userMapper.toEntity(request))
-                .thenReturn(duplicateUser);
+                .thenReturn(user);
 
-        when(userRepository.saveAndFlush(duplicateUser))
+        when(userRepository.saveAndFlush(user))
                 .thenThrow(
                         new DataIntegrityViolationException(
-                                "duplicate key value violates unique constraint"
+                                "Duplicate email"
                         )
                 );
 
@@ -141,66 +135,60 @@ public class UserServiceImplTest {
                 );
 
         assertEquals(
-                "User with email 'duplicate@gmail.com' already exists",
+                "User with email 'prathamesh@gmail.com' already exists",
                 exception.getMessage()
         );
 
-        verify(userMapper).toEntity(request);
-        verify(userRepository).saveAndFlush(duplicateUser);
+        verify(userMapper)
+                .toEntity(request);
+
+        verify(userRepository)
+                .saveAndFlush(user);
+
         verify(userMapper, never())
                 .toResponse(any(User.class));
     }
 
 
-    // --------------------------------------------------
+    // =========================================================
     // GET ALL
-    // --------------------------------------------------
+    // =========================================================
 
     @Test
-    void getAllUsers_shouldReturnAllUsers() {
+    void getAllUsers_shouldReturnUsers() {
 
-        User user2 = new User();
-        user2.setId(2L);
-        user2.setFirstName("Dipti");
-        user2.setLastName("Malave");
-        user2.setEmail("dipti@gmail.com");
-        user2.setPhone("9234567890");
-
-        UserResponse response2 = new UserResponse();
-        response2.setId(2L);
-        response2.setFirstName("Dipti");
-        response2.setLastName("Malave");
-        response2.setEmail("dipti@gmail.com");
-        response2.setPhone("9234567890");
+        Pageable pageable =
+                PageRequest.of(
+                        0,
+                        10,
+                        Sort.by("createdAt").descending()
+                );
 
         Page<User> userPage =
-                new PageImpl<>(List.of(user, user2));
+                new PageImpl<>(
+                        List.of(user),
+                        pageable,
+                        1
+                );
 
-        when(userRepository.findAll(any(Pageable.class)))
+        when(userRepository.findAll(pageable))
                 .thenReturn(userPage);
 
         when(userMapper.toResponse(user))
-                .thenReturn(userResponse);
-
-        when(userMapper.toResponse(user2))
-                .thenReturn(response2);
-
-        Pageable pageable = Pageable.ofSize(2);
+                .thenReturn(response);
 
         Page<UserResponse> result =
                 userService.getAllUsers(pageable);
 
         assertNotNull(result);
-        assertEquals(2, result.getContent().size());
+        assertEquals(1, result.getTotalElements());
+        assertEquals(1, result.getContent().size());
 
         assertEquals(
                 "Prathamesh",
-                result.getContent().get(0).getFirstName()
-        );
-
-        assertEquals(
-                "Dipti",
-                result.getContent().get(1).getFirstName()
+                result.getContent()
+                        .get(0)
+                        .getFirstName()
         );
 
         verify(userSortValidator)
@@ -209,23 +197,212 @@ public class UserServiceImplTest {
         verify(userRepository)
                 .findAll(pageable);
 
-        verify(userMapper).toResponse(user);
-        verify(userMapper).toResponse(user2);
+        verify(userMapper)
+                .toResponse(user);
     }
 
 
-    // --------------------------------------------------
-    // GET BY ID - SUCCESS
-    // --------------------------------------------------
+    @Test
+    void getAllUsers_shouldReturnEmptyPage() {
+
+        Pageable pageable =
+                PageRequest.of(0, 10);
+
+        Page<User> emptyPage =
+                new PageImpl<>(List.of());
+
+        when(userRepository.findAll(pageable))
+                .thenReturn(emptyPage);
+
+        Page<UserResponse> result =
+                userService.getAllUsers(pageable);
+
+        assertNotNull(result);
+        assertTrue(result.isEmpty());
+
+        verify(userSortValidator)
+                .validate(pageable.getSort());
+
+        verify(userRepository)
+                .findAll(pageable);
+
+        verify(userMapper, never())
+                .toResponse(any(User.class));
+    }
+
 
     @Test
-    void getUserById_shouldReturnUserSuccessfully() {
+    void getAllUsers_shouldRejectInvalidSortField() {
+
+        Pageable pageable =
+                PageRequest.of(
+                        0,
+                        10,
+                        Sort.by("password").ascending()
+                );
+
+        doThrow(
+                new InvalidSortFieldException(
+                        "Sorting by field 'password' is not allowed"
+                )
+        )
+                .when(userSortValidator)
+                .validate(pageable.getSort());
+
+        InvalidSortFieldException exception =
+                assertThrows(
+                        InvalidSortFieldException.class,
+                        () -> userService.getAllUsers(pageable)
+                );
+
+        assertEquals(
+                "Sorting by field 'password' is not allowed",
+                exception.getMessage()
+        );
+
+        verify(userSortValidator)
+                .validate(pageable.getSort());
+
+        verify(userRepository, never())
+                .findAll(any(Pageable.class));
+    }
+
+
+    // =========================================================
+    // SEARCH
+    // =========================================================
+
+    @Test
+    void searchUsers_shouldReturnMatchingUsers() {
+
+        Pageable pageable =
+                PageRequest.of(
+                        0,
+                        10,
+                        Sort.by("createdAt").descending()
+                );
+
+        Page<User> userPage =
+                new PageImpl<>(
+                        List.of(user),
+                        pageable,
+                        1
+                );
+
+        when(userRepository.searchUsers(
+                "gmail",
+                pageable
+        )).thenReturn(userPage);
+
+        when(userMapper.toResponse(user))
+                .thenReturn(response);
+
+        Page<UserResponse> result =
+                userService.searchUsers(
+                        "gmail",
+                        pageable
+                );
+
+        assertNotNull(result);
+        assertEquals(1, result.getTotalElements());
+        assertEquals(
+                "prathamesh@gmail.com",
+                result.getContent()
+                        .get(0)
+                        .getEmail()
+        );
+
+        verify(userSortValidator)
+                .validate(pageable.getSort());
+
+        verify(userRepository)
+                .searchUsers("gmail", pageable);
+
+        verify(userMapper)
+                .toResponse(user);
+    }
+
+
+    @Test
+    void searchUsers_shouldReturnEmptyPage() {
+
+        Pageable pageable =
+                PageRequest.of(0, 10);
+
+        Page<User> emptyPage =
+                new PageImpl<>(List.of());
+
+        when(userRepository.searchUsers(
+                "xyz",
+                pageable
+        )).thenReturn(emptyPage);
+
+        Page<UserResponse> result =
+                userService.searchUsers(
+                        "xyz",
+                        pageable
+                );
+
+        assertNotNull(result);
+        assertTrue(result.isEmpty());
+
+        verify(userSortValidator)
+                .validate(pageable.getSort());
+
+        verify(userRepository)
+                .searchUsers("xyz", pageable);
+    }
+
+
+    @Test
+    void searchUsers_shouldRejectInvalidSortField() {
+
+        Pageable pageable =
+                PageRequest.of(
+                        0,
+                        10,
+                        Sort.by("password").descending()
+                );
+
+        doThrow(
+                new InvalidSortFieldException(
+                        "Sorting by field 'password' is not allowed"
+                )
+        )
+                .when(userSortValidator)
+                .validate(pageable.getSort());
+
+        assertThrows(
+                InvalidSortFieldException.class,
+                () -> userService.searchUsers(
+                        "gmail",
+                        pageable
+                )
+        );
+
+        verify(userSortValidator)
+                .validate(pageable.getSort());
+
+        verify(userRepository, never())
+                .searchUsers(
+                        anyString(),
+                        any(Pageable.class)
+                );
+    }
+
+
+    // =========================================================
+    // GET BY ID
+    // =========================================================
+
+    @Test
+    void getUserById_shouldReturnUser() {
 
         when(userRepository.findById(1L))
                 .thenReturn(Optional.of(user));
 
         when(userMapper.toResponse(user))
-                .thenReturn(userResponse);
+                .thenReturn(response);
 
         UserResponse result =
                 userService.getUserById(1L);
@@ -241,14 +418,13 @@ public class UserServiceImplTest {
                 result.getEmail()
         );
 
-        verify(userRepository).findById(1L);
-        verify(userMapper).toResponse(user);
+        verify(userRepository)
+                .findById(1L);
+
+        verify(userMapper)
+                .toResponse(user);
     }
 
-
-    // --------------------------------------------------
-    // GET BY ID - NOT FOUND
-    // --------------------------------------------------
 
     @Test
     void getUserById_shouldThrowExceptionWhenUserNotFound() {
@@ -262,57 +438,110 @@ public class UserServiceImplTest {
                         () -> userService.getUserById(99L)
                 );
 
-        assertNotNull(exception);
+        assertEquals(
+                "User not found with Id : 99",
+                exception.getMessage()
+        );
 
-        verify(userRepository).findById(99L);
+        verify(userRepository)
+                .findById(99L);
 
         verify(userMapper, never())
                 .toResponse(any(User.class));
     }
 
 
-    // --------------------------------------------------
-    // UPDATE - SUCCESS
-    // --------------------------------------------------
+    // =========================================================
+    // UPDATE
+    // =========================================================
 
     @Test
     void updateUser_shouldUpdateUserSuccessfully() {
+
+        User updatedUser = new User();
+
+        updatedUser.setId(1L);
+        updatedUser.setFirstName("Updated");
+        updatedUser.setLastName("User");
+        updatedUser.setEmail("updated@gmail.com");
+        updatedUser.setPhone("9999999999");
+
+        UserResponse updatedResponse =
+                new UserResponse();
+
+        updatedResponse.setId(1L);
+        updatedResponse.setFirstName("Updated");
+        updatedResponse.setLastName("User");
+        updatedResponse.setEmail("updated@gmail.com");
+        updatedResponse.setPhone("9999999999");
+
+        request.setFirstName("Updated");
+        request.setLastName("User");
+        request.setEmail("updated@gmail.com");
+        request.setPhone("9999999999");
 
         when(userRepository.findById(1L))
                 .thenReturn(Optional.of(user));
 
         when(userRepository.save(user))
-                .thenReturn(user);
+                .thenReturn(updatedUser);
 
-        when(userMapper.toResponse(user))
-                .thenReturn(userResponse);
+        when(userMapper.toResponse(updatedUser))
+                .thenReturn(updatedResponse);
 
         UserResponse result =
                 userService.updateUser(
                         1L,
-                        userRequest
+                        request
                 );
 
         assertNotNull(result);
-        assertEquals(1L, result.getId());
+
         assertEquals(
-                "Prathamesh",
+                "Updated",
                 result.getFirstName()
         );
+
         assertEquals(
-                "prathamesh@gmail.com",
+                "updated@gmail.com",
                 result.getEmail()
         );
 
-        verify(userRepository).findById(1L);
-        verify(userRepository).save(user);
-        verify(userMapper).toResponse(user);
+        assertEquals(
+                "9999999999",
+                result.getPhone()
+        );
+
+        assertEquals(
+                "Updated",
+                user.getFirstName()
+        );
+
+        assertEquals(
+                "User",
+                user.getLastName()
+        );
+
+        assertEquals(
+                "updated@gmail.com",
+                user.getEmail()
+        );
+
+        assertEquals(
+                "9999999999",
+                user.getPhone()
+        );
+
+        verify(userRepository)
+                .findById(1L);
+
+        verify(userRepository)
+                .save(user);
+
+        verify(userMapper)
+                .toResponse(updatedUser);
     }
 
-
-    // --------------------------------------------------
-    // UPDATE - NOT FOUND
-    // --------------------------------------------------
 
     @Test
     void updateUser_shouldThrowExceptionWhenUserNotFound() {
@@ -320,24 +549,31 @@ public class UserServiceImplTest {
         when(userRepository.findById(99L))
                 .thenReturn(Optional.empty());
 
-        assertThrows(
-                ResourceNotFoundException.class,
-                () -> userService.updateUser(
-                        99L,
-                        userRequest
-                )
+        ResourceNotFoundException exception =
+                assertThrows(
+                        ResourceNotFoundException.class,
+                        () -> userService.updateUser(
+                                99L,
+                                request
+                        )
+                );
+
+        assertEquals(
+                "User not found with Id : 99",
+                exception.getMessage()
         );
 
-        verify(userRepository).findById(99L);
+        verify(userRepository)
+                .findById(99L);
 
         verify(userRepository, never())
                 .save(any(User.class));
     }
 
 
-    // --------------------------------------------------
-    // DELETE - SUCCESS
-    // --------------------------------------------------
+    // =========================================================
+    // DELETE
+    // =========================================================
 
     @Test
     void deleteUser_shouldDeleteUserSuccessfully() {
@@ -345,20 +581,15 @@ public class UserServiceImplTest {
         when(userRepository.existsById(1L))
                 .thenReturn(true);
 
-        doNothing()
-                .when(userRepository)
-                .deleteById(1L);
-
         userService.deleteUser(1L);
 
-        verify(userRepository).existsById(1L);
-        verify(userRepository).deleteById(1L);
+        verify(userRepository)
+                .existsById(1L);
+
+        verify(userRepository)
+                .deleteById(1L);
     }
 
-
-    // --------------------------------------------------
-    // DELETE - NOT FOUND
-    // --------------------------------------------------
 
     @Test
     void deleteUser_shouldThrowExceptionWhenUserNotFound() {
@@ -366,99 +597,21 @@ public class UserServiceImplTest {
         when(userRepository.existsById(99L))
                 .thenReturn(false);
 
-        assertThrows(
-                ResourceNotFoundException.class,
-                () -> userService.deleteUser(99L)
+        ResourceNotFoundException exception =
+                assertThrows(
+                        ResourceNotFoundException.class,
+                        () -> userService.deleteUser(99L)
+                );
+
+        assertEquals(
+                "User not found with Id : 99",
+                exception.getMessage()
         );
 
-        verify(userRepository).existsById(99L);
+        verify(userRepository)
+                .existsById(99L);
 
         verify(userRepository, never())
                 .deleteById(99L);
-    }
-
-
-    // --------------------------------------------------
-    // SORTING VALIDATION
-    // --------------------------------------------------
-
-    @Test
-    void getAllUsers_shouldRejectInvalidSortField() {
-
-        Pageable pageable = PageRequest.of(
-                0,
-                10,
-                Sort.by("password").ascending()
-        );
-
-        doThrow(
-                new InvalidSortFieldException(
-                        "Sorting by field 'password' is not allowed"
-                )
-        )
-                .when(userSortValidator)
-                .validate(pageable.getSort());
-
-        assertThrows(
-                InvalidSortFieldException.class,
-                () -> userService.getAllUsers(pageable)
-        );
-
-        verify(userSortValidator)
-                .validate(pageable.getSort());
-
-        verify(userRepository, never())
-                .findAll(any(Pageable.class));
-    }
-
-
-    // --------------------------------------------------
-    // SEARCH
-    // --------------------------------------------------
-
-    @Test
-    void searchUsers_shouldPassSearchAndPageableToRepository() {
-
-        Pageable pageable = PageRequest.of(
-                0,
-                2,
-                Sort.by("createdAt").descending()
-        );
-
-        Page<User> userPage =
-                new PageImpl<>(List.of(user));
-
-        when(userRepository.searchUsers(
-                "gmail",
-                pageable
-        ))
-                .thenReturn(userPage);
-
-        when(userMapper.toResponse(user))
-                .thenReturn(userResponse);
-
-        Page<UserResponse> result =
-                userService.searchUsers(
-                        "gmail",
-                        pageable
-                );
-
-        assertNotNull(result);
-        assertEquals(
-                1,
-                result.getContent().size()
-        );
-
-        verify(userSortValidator)
-                .validate(pageable.getSort());
-
-        verify(userRepository)
-                .searchUsers(
-                        "gmail",
-                        pageable
-                );
-
-        verify(userMapper)
-                .toResponse(user);
     }
 }

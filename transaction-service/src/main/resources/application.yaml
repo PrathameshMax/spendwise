@@ -5,6 +5,11 @@ server:
 spring:
   application:
     name: transaction-service
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: http://localhost:8080/realms/spendwise
 
   datasource:
     url: jdbc:postgresql://localhost:5432/spendwise_transaction
