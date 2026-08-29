@@ -16,6 +16,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import io.micrometer.core.instrument.MeterRegistry;
 
 @Service
 public class UserServiceImpl implements UserService {
@@ -25,15 +26,17 @@ public class UserServiceImpl implements UserService {
     private final UserRepository userRepository;
     private final UserMapper userMapper;
     private final UserSortValidator userSortValidator;
+    private final MeterRegistry meterRegistry;
 
     public UserServiceImpl(
             UserRepository userRepository,
             UserMapper userMapper,
-            UserSortValidator userSortValidator) {
+            UserSortValidator userSortValidator, MeterRegistry meterRegistry) {
 
         this.userRepository = userRepository;
         this.userMapper = userMapper;
         this.userSortValidator = userSortValidator;
+        this.meterRegistry = meterRegistry;
     }
 
     @Override
@@ -45,6 +48,7 @@ public class UserServiceImpl implements UserService {
 
         try {
             User savedUser = userRepository.saveAndFlush(user);
+            meterRegistry.counter("spendwise.users.created").increment();
             log.info(
                     "User created successfully, userId={}",
                     savedUser.getId()
@@ -116,7 +120,7 @@ public class UserServiceImpl implements UserService {
         user.setPhone(request.getPhone());
 
         User updated = userRepository.save(user);
-
+        meterRegistry.counter("spendwise.users.updated").increment();
         return mapToResponse(updated);
     }
 
@@ -130,6 +134,7 @@ public class UserServiceImpl implements UserService {
         }
 
         userRepository.deleteById(id);
+        meterRegistry.counter("spendwise.users.deleted").increment();
     }
 
     private UserResponse mapToResponse(User user) {

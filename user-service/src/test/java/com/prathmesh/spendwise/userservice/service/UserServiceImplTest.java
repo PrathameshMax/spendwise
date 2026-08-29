@@ -11,6 +11,7 @@ import com.prathmesh.spendwise.userservice.mapper.UserMapper;
 import com.prathmesh.spendwise.userservice.repository.UserRepository;
 import com.prathmesh.spendwise.userservice.validation.UserSortValidator;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -29,6 +30,8 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.mockito.Spy;
 
 @ExtendWith(MockitoExtension.class)
 class UserServiceImplTest {
@@ -44,6 +47,9 @@ class UserServiceImplTest {
 
     @InjectMocks
     private UserServiceImpl userService;
+
+    @Spy
+    private MeterRegistry meterRegistry = new SimpleMeterRegistry();
 
     private User user;
     private UserRequest request;
@@ -112,6 +118,13 @@ class UserServiceImplTest {
 
         verify(userMapper)
                 .toResponse(user);
+
+        assertEquals(
+                1.0,
+                meterRegistry
+                        .counter("spendwise.users.created")
+                        .count()
+        );
     }
 
 
@@ -540,6 +553,13 @@ class UserServiceImplTest {
 
         verify(userMapper)
                 .toResponse(updatedUser);
+
+        assertEquals(
+                1.0,
+                meterRegistry
+                        .counter("spendwise.users.updated")
+                        .count()
+        );
     }
 
 
@@ -588,6 +608,13 @@ class UserServiceImplTest {
 
         verify(userRepository)
                 .deleteById(1L);
+
+        assertEquals(
+                1.0,
+                meterRegistry
+                        .counter("spendwise.users.deleted")
+                        .count()
+        );
     }
 
 

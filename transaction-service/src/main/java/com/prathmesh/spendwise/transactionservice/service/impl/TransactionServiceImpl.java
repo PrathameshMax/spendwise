@@ -14,6 +14,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import io.micrometer.core.instrument.MeterRegistry;
 
 import java.util.List;
 
@@ -26,12 +27,14 @@ public class TransactionServiceImpl implements TransactionService {
 
     private final TransactionRepository transactionRepository;
     private final UserServiceClient userServiceClient;
+    private final MeterRegistry meterRegistry;
 
     public TransactionServiceImpl(
-            TransactionRepository transactionRepository, UserServiceClient userServiceClient) {
+            TransactionRepository transactionRepository, UserServiceClient userServiceClient, MeterRegistry meterRegistry) {
 
         this.transactionRepository = transactionRepository;
         this.userServiceClient = userServiceClient;
+        this.meterRegistry = meterRegistry;
     }
 
     @Override
@@ -48,6 +51,7 @@ public class TransactionServiceImpl implements TransactionService {
 
         Transaction saved =
                 transactionRepository.save(transaction);
+        meterRegistry.counter("spendwise.transactions.created").increment();
         log.info("Transaction created successfully, transactionId={}", saved.getId());
 
         return mapToResponse(saved);
@@ -101,7 +105,8 @@ public class TransactionServiceImpl implements TransactionService {
 
         Transaction updated =
                 transactionRepository.save(transaction);
-log.info("Successfully updated transaction, transactionId={}", updated.getId());
+        meterRegistry.counter("spendwise.transactions.updated").increment();
+        log.info("Successfully updated transaction, transactionId={}", updated.getId());
         return mapToResponse(updated);
     }
 
@@ -116,8 +121,9 @@ log.info("Successfully updated transaction, transactionId={}", updated.getId());
                     "Transaction not found with Id : " + id
             );
         }
-log.info("Transaction deleted successfully, transactionId={}", id);
+        log.info("Transaction deleted successfully, transactionId={}", id);
         transactionRepository.deleteById(id);
+        meterRegistry.counter("spendwise.transactions.deleted").increment();
     }
 
     @Override
