@@ -59,4 +59,17 @@ public class GatewayServiceApplicationTests {
                 .jsonPath("$.names")
                 .isArray();
     }
+
+    @Test
+    void gatewayApplication_shouldLoadUserServiceRoute() {
+
+        webTestClient
+                .get()
+                .uri("/actuator/gateway/routes")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$[?(@.route_id == 'user-service-route')]")
+                .exists();
+    }
 }
