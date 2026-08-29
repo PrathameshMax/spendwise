@@ -10,6 +10,10 @@ spring:
               uri: ${USER_SERVICE_URL:http://localhost:8081}
               predicates:
                 - Path=/api/v1/users/**
+            - id: transaction-service-route
+              uri: ${TRANSACTION_SERVICE_URL:http://localhost:8082}
+              predicates:
+                - Path=/api/v1/transactions/**
 
 
 server:
@@ -30,7 +34,7 @@ management:
 
   endpoint:
     gateway:
-      enabled: true
+      access: unrestricted
     health:
       probes:
         enabled: true

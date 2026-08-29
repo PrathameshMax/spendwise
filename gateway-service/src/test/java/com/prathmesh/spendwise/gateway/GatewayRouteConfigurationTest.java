@@ -66,10 +66,30 @@ public class GatewayRouteConfigurationTest {
         MockServerWebExchange exchange =
                 MockServerWebExchange.from(request);
 
-        assertTrue(
-                Mono.from(
-                        userRoute.getPredicate().apply(exchange)
-                ).block()
+        assertEquals(Boolean.TRUE, Mono.from(
+                userRoute.getPredicate().apply(exchange)
+        ).block());
+    }
+
+    @Test
+    void transactionServiceRoute_shouldBeConfigured() {
+
+        List<Route> routes = routeLocator
+                .getRoutes()
+                .collectList()
+                .block();
+
+        assertNotNull(routes);
+
+        Route transactionRoute = routes.stream()
+                .filter(route ->
+                        route.getId().equals("transaction-service-route"))
+                .findFirst()
+                .orElseThrow();
+
+        assertEquals(
+                "http://localhost:8082",
+                transactionRoute.getUri().toString()
         );
     }
 }
