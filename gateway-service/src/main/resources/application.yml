@@ -15,3 +15,13 @@ management:
     health:
       probes:
         enabled: true
+
+  info:
+    env:
+      enabled: true
+
+info:
+  app:
+    name: SpendWise Gateway
+    description: API Gateway for SpendWise microservices
+    version: 1.0.0
