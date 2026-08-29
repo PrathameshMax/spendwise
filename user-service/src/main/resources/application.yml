@@ -42,6 +42,8 @@ spring:
 
 logging:
   level:
+    org.springframework.security: DEBUG
+    org.springframework.security.oauth2.server.resource: TRACE
     root: INFO
     com.prathmesh.spendwise.userservice: INFO
 
@@ -52,7 +54,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health, metrics
+        include: health, metrics, info, prometheus
   endpoint:
     health:
       group:

@@ -9,6 +9,7 @@ import com.prathmesh.spendwise.transactionservice.exception.TransactionNotFoundE
 import com.prathmesh.spendwise.transactionservice.repository.TransactionRepository;
 import com.prathmesh.spendwise.transactionservice.service.impl.TransactionServiceImpl;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -28,6 +29,8 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.mockito.Spy;
 
 @ExtendWith(MockitoExtension.class)
 class TransactionServiceImplTest {
@@ -40,6 +43,9 @@ class TransactionServiceImplTest {
 
     @InjectMocks
     private TransactionServiceImpl transactionService;
+
+    @Spy
+    private MeterRegistry meterRegistry = new SimpleMeterRegistry();
 
     private TransactionRequest request;
     private Transaction transaction;
@@ -105,6 +111,13 @@ class TransactionServiceImplTest {
 
         verify(transactionRepository)
                 .save(any(Transaction.class));
+
+        assertEquals(
+                1.0,
+                meterRegistry
+                        .counter("spendwise.transactions.created")
+                        .count()
+        );
     }
 
 
@@ -380,6 +393,13 @@ class TransactionServiceImplTest {
 
         verify(transactionRepository)
                 .save(transaction);
+
+        assertEquals(
+                1.0,
+                meterRegistry
+                        .counter("spendwise.transactions.updated")
+                        .count()
+        );
     }
 
 
@@ -429,6 +449,13 @@ class TransactionServiceImplTest {
 
         verify(transactionRepository)
                 .deleteById(1L);
+
+        assertEquals(
+                1.0,
+                meterRegistry
+                        .counter("spendwise.transactions.deleted")
+                        .count()
+        );
     }
 
 

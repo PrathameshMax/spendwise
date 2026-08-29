@@ -31,7 +31,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health, metrics
+        include: health, metrics, info, prometheus
   endpoint:
     health:
       group:
