@@ -14,7 +14,12 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-@SpringBootTest
+@SpringBootTest(
+        properties = {
+                "USER_SERVICE_URL=http://localhost:8081",
+                "TRANSACTION_SERVICE_URL=http://localhost:8082"
+        }
+)
 public class GatewayRouteConfigurationTest {
 
     @Autowired
