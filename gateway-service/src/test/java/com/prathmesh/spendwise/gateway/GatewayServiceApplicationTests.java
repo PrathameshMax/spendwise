@@ -7,7 +7,10 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.test.web.reactive.server.WebTestClient;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.springframework.context.annotation.Import;
 
+
+@Import(GatewayTestSecurityConfig.class)
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 public class GatewayServiceApplicationTests {
     @Autowired
@@ -53,6 +56,7 @@ public class GatewayServiceApplicationTests {
         webTestClient
                 .get()
                 .uri("/actuator/metrics")
+                .header("Authorization", "Bearer test-token")
                 .exchange()
                 .expectStatus().isOk()
                 .expectBody()
@@ -66,6 +70,7 @@ public class GatewayServiceApplicationTests {
         webTestClient
                 .get()
                 .uri("/actuator/gateway/routes")
+                .header("Authorization", "Bearer test-token")
                 .exchange()
                 .expectStatus().isOk()
                 .expectBody()

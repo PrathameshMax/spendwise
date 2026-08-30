@@ -13,7 +13,9 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.reactive.server.WebTestClient;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.*;
+import org.springframework.context.annotation.Import;
 
+@Import(GatewayTestSecurityConfig.class)
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = {
@@ -86,6 +88,7 @@ public class GatewayRoutingIntegrationTest {
         webTestClient
                 .get()
                 .uri("/api/v1/users/123")
+                .header("Authorization", "Bearer test-token")
                 .exchange()
                 .expectStatus().isOk()
                 .expectBody(String.class)
@@ -119,6 +122,7 @@ public class GatewayRoutingIntegrationTest {
         webTestClient
                 .get()
                 .uri("/api/v1/transactions/123")
+                .header("Authorization", "Bearer test-token")
                 .exchange()
                 .expectStatus().isOk()
                 .expectBody(String.class)
@@ -151,6 +155,7 @@ public class GatewayRoutingIntegrationTest {
         webTestClient
                 .get()
                 .uri("/api/v1/users?page=0&size=10")
+                .header("Authorization", "Bearer test-token")
                 .exchange()
                 .expectStatus().isOk();
 
@@ -187,6 +192,7 @@ public class GatewayRoutingIntegrationTest {
         webTestClient
                 .post()
                 .uri("/api/v1/users")
+                .header("Authorization", "Bearer test-token")
                 .bodyValue(requestBody)
                 .exchange()
                 .expectStatus().isCreated();
@@ -224,6 +230,7 @@ public class GatewayRoutingIntegrationTest {
         webTestClient
                 .put()
                 .uri("/api/v1/users/123")
+                .header("Authorization", "Bearer test-token")
                 .bodyValue(requestBody)
                 .exchange()
                 .expectStatus().isOk();
@@ -252,6 +259,7 @@ public class GatewayRoutingIntegrationTest {
         webTestClient
                 .delete()
                 .uri("/api/v1/users/123")
+                .header("Authorization", "Bearer test-token")
                 .exchange()
                 .expectStatus().isNoContent();
 
@@ -286,6 +294,7 @@ public class GatewayRoutingIntegrationTest {
         webTestClient
                 .post()
                 .uri("/api/v1/transactions")
+                .header("Authorization", "Bearer test-token")
                 .bodyValue(requestBody)
                 .exchange()
                 .expectStatus().isCreated();
@@ -314,6 +323,7 @@ public class GatewayRoutingIntegrationTest {
         webTestClient
                 .delete()
                 .uri("/api/v1/transactions/123")
+                .header("Authorization", "Bearer test-token")
                 .exchange()
                 .expectStatus().isNoContent();
 
@@ -331,6 +341,7 @@ public class GatewayRoutingIntegrationTest {
         webTestClient
                 .get()
                 .uri("/api/v1/unknown")
+                .header("Authorization", "Bearer test-token")
                 .exchange()
                 .expectStatus().is4xxClientError();
 
@@ -359,6 +370,7 @@ public class GatewayRoutingIntegrationTest {
         webTestClient
                 .get()
                 .uri("/api/v1/users/123")
+                .header("Authorization", "Bearer test-token")
                 .exchange()
                 .expectStatus().isOk();
 
@@ -382,12 +394,22 @@ public class GatewayRoutingIntegrationTest {
         webTestClient
                 .get()
                 .uri("/api/v1/transactions/123")
+                .header("Authorization", "Bearer test-token")
                 .exchange()
                 .expectStatus().isOk();
 
         userService.verify(
                 0,
                 anyRequestedFor(anyUrl())
+        );
+    }
+
+    private WebTestClient.RequestHeadersSpec<?> authenticated(
+            WebTestClient.RequestHeadersSpec<?> request) {
+
+        return request.header(
+                "Authorization",
+                "Bearer test-token"
         );
     }
 }
