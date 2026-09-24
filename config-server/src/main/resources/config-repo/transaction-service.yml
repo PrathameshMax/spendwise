@@ -1,0 +1,3 @@
+# Centralized configuration for transaction-service. Populated as later milestones (JPA,
+# security, Kafka, resilience) introduce properties that need to be
+# environment-driven.

@@ -3,10 +3,17 @@ spring:
     name: analytics-service
   profiles:
     active: dev
+  config:
+    import: "configserver:http://localhost:8888"
+  cloud:
+    config:
+      fail-fast: true
 
 server:
   port: 8086
 
-logging:
-  pattern:
-    level: "%5p [${spring.application.name},%X{correlationId}]"
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,refresh

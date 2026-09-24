@@ -1,0 +1,3 @@
+# Centralized configuration for budget-service. Populated as later milestones (JPA,
+# security, Kafka, resilience) introduce properties that need to be
+# environment-driven.

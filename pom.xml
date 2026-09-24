@@ -13,15 +13,16 @@
 
     <modules>
         <module>spendwise-common</module>
+        <module>config-server</module>
         <module>auth-service</module>
         <module>user-service</module>
         <module>transaction-service</module>
         <module>budget-service</module>
         <module>notification-service</module>
         <module>analytics-service</module>
-        <!-- api-gateway, discovery-server, config-server are added when Milestones 2, 6 and 10
-             introduce them — an empty shell of a gateway/registry/config server has no
-             meaningful content before those milestones' dependencies exist. -->
+        <!-- api-gateway and discovery-server are added when Milestones 6 and 10 introduce
+             them — an empty shell of a gateway/registry has no meaningful content before
+             those milestones' dependencies exist. -->
     </modules>
 
     <properties>
