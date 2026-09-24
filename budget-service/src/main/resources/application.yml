@@ -1,0 +1,12 @@
+spring:
+  application:
+    name: budget-service
+  profiles:
+    active: dev
+
+server:
+  port: 8084
+
+logging:
+  pattern:
+    level: "%5p [${spring.application.name},%X{correlationId}]"

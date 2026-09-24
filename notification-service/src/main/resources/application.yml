@@ -1,0 +1,12 @@
+spring:
+  application:
+    name: notification-service
+  profiles:
+    active: dev
+
+server:
+  port: 8085
+
+logging:
+  pattern:
+    level: "%5p [${spring.application.name},%X{correlationId}]"
