@@ -22,6 +22,32 @@ Roadmaps: `SpendWise_Functional_Roadmap_v2` and `SpendWise_Technical_Roadmap_v2`
 `api-gateway` and `discovery-server` are added when Milestones 6 and 10 respectively
 introduce them.
 
+## Path to Polyrepo
+
+This is a monorepo for development convenience during the interview-prep build, not
+an architectural commitment. The one rule that keeps the door open to splitting it
+later: **no service depends on any other module except `spendwise-common`, and
+`spendwise-common` carries zero business logic** (no JPA entities, no domain models,
+no service-specific validation — only generic plumbing like `CorrelationIdFilter`
+and the exception hierarchy). Every service already has its own database, own port,
+own config-repo entries, and no runtime dependency on any other service.
+
+When it's time to split into standalone repos, per service:
+
+1. **Publish `spendwise-common` as a versioned artifact** (GitHub Packages, or a
+   Nexus/Artifactory) instead of resolving it via the Maven reactor. Same for
+   `spendwise-parent`'s BOM, so every service keeps its managed dependency versions
+   without living in the same repo.
+2. **Extract with history intact**: `git subtree split -P <service> -b <service>-only`,
+   then push that branch to a new `PrathameshMax/<service>` repo.
+3. **Swap the `<parent>`** in each extracted service's `pom.xml` to point at the
+   published `spendwise-parent` artifact instead of a sibling path.
+4. **Split CI/CD** from one monorepo pipeline into one pipeline per repo — same
+   build/test steps, just scoped to a single module instead of the whole reactor.
+
+Nothing in the current module structure, database-per-service setup, or config
+layout needs to change for this — it's a build/repo reorganization, not a redesign.
+
 ## Running locally
 
 Config Server must be up before any other service, since every service now bootstraps
