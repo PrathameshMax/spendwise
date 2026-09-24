@@ -63,11 +63,13 @@ mvn -pl user-service spring-boot:run
 Config Server runs in `native` mode, serving property files from
 `config-server/src/main/resources/config-repo/` — no external Git repo or broker required.
 
-Zipkin (the tracing backend, Milestone 3) runs via Docker Compose:
+Zipkin (the tracing backend, Milestone 3) and PostgreSQL (Milestone 4) run via Docker
+Compose:
 
 ```bash
-docker compose up -d zipkin
+docker compose up -d zipkin postgres
 # view traces at http://localhost:9411
+# postgres exposes 4 isolated databases: auth_db, user_db, transaction_db, budget_db
 ```
 
 ## Status
@@ -94,4 +96,23 @@ here — it has no request entry point until its Kafka listener exists at Milest
 and Feign/WebClient header propagation is deferred to Milestone 10, when there's an
 actual inter-service call to propagate across.
 
-Next: Milestone 4 — Database Isolation & Dialect Testing (Flyway + Testcontainers).
+**Milestone 4 (Phase 1) complete** — Database Isolation & Dialect Testing, plus basic
+CRUD for `auth-service`, `user-service`, `transaction-service`, and `budget-service`
+(by explicit request — the roadmap text scopes this milestone to the DB layer only,
+but a bare repository with no consumer was judged not worth shipping alone). Each
+service owns a real PostgreSQL database (`auth_db`, `user_db`, `transaction_db`,
+`budget_db`), versioned by Flyway migrations, validated (not auto-generated) by
+Hibernate (`ddl-auto: validate`), and covered by a Testcontainers repository
+integration test. Highlights: `UserController`'s list endpoint is paginated and
+sortable (`?page=&size=&sort=`); `TransactionController` supports dynamic filtering
+by user/category/type/date-range/amount-range via JPA Specifications; `Transaction`'s
+`Category` association is deliberately lazy-loaded, setting up the N+1 chaos lab at
+Milestone 27; `Budget.currentSpend` starts at zero and stays there until the
+Kafka-driven consumer lands at Milestone 18+. No global exception handler exists yet
+(Milestone 7), so `DuplicateResourceException`/`ResourceNotFoundException` currently
+surface as generic 500s — that's expected at this stage, not a bug.
+`notification_db` and `analytics_db` are deferred (needed at Milestone 19 and rebuilt
+on R2DBC/Mongo at Milestone 15, respectively).
+
+Next: Milestone 5 — Deep Observability Probes & Telemetry Dashboards (Actuator health
+probes, Prometheus, Grafana).

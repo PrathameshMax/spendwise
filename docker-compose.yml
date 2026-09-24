@@ -1,11 +1,24 @@
-version: "3.8"
-
-# Milestone 3 scope: only the third-party tracing backend our services export spans to.
-# Containerizing our own services (Dockerfiles, resource limits, compose wiring between
-# them) is Milestone 9's job — this file grows there, not here.
+# Milestone 3/4 scope: only the third-party backends our services depend on (tracing,
+# database). Containerizing our own services (Dockerfiles, resource limits, compose
+# wiring between them) is Milestone 9's job — this file grows there, not here.
 services:
   zipkin:
     image: openzipkin/zipkin:latest
     container_name: spendwise-zipkin
     ports:
       - "9411:9411"
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: spendwise-postgres
+    environment:
+      POSTGRES_USER: spendwise
+      POSTGRES_PASSWORD: spendwise
+    ports:
+      - "5432:5432"
+    volumes:
+      - spendwise-postgres-data:/var/lib/postgresql/data
+      - ./infra/postgres-init:/docker-entrypoint-initdb.d
+
+volumes:
+  spendwise-postgres-data:

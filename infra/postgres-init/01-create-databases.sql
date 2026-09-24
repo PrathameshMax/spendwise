@@ -1,0 +1,4 @@
+CREATE DATABASE auth_db;
+CREATE DATABASE user_db;
+CREATE DATABASE transaction_db;
+CREATE DATABASE budget_db;

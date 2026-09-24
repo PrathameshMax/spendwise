@@ -2,3 +2,7 @@ logging:
   level:
     root: INFO
     com.spendwise: DEBUG
+
+spring:
+  jpa:
+    show-sql: true
