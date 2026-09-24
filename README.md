@@ -37,6 +37,13 @@ mvn -pl user-service spring-boot:run
 Config Server runs in `native` mode, serving property files from
 `config-server/src/main/resources/config-repo/` — no external Git repo or broker required.
 
+Zipkin (the tracing backend, Milestone 3) runs via Docker Compose:
+
+```bash
+docker compose up -d zipkin
+# view traces at http://localhost:9411
+```
+
 ## Status
 
 **Milestone 1 (Phase 1) complete** — monorepo BOM, per-environment profile skeleton
@@ -50,4 +57,15 @@ single-instance config refresh; the Spring Cloud Bus broadcast (fleet-wide refre
 is deferred until Milestone 13, where it rides on the same Kafka cluster instead of
 standing up a separate broker just for this.
 
-Next: Milestone 3 — Distributed Request Tracing (MDC + Micrometer + OpenTelemetry).
+**Milestone 3 (Phase 1) complete** — Distributed Request Tracing. `auth-service`,
+`user-service`, `transaction-service`, `budget-service`, and `analytics-service` each
+register `spendwise-common`'s `CorrelationIdFilter`, seeding/propagating
+`X-Correlation-ID` into the MDC on every request. Micrometer Tracing's OpenTelemetry
+bridge exports spans to Zipkin (`management.zipkin.tracing.endpoint`, centralized in
+`config-repo/application.yml`), and the shared log pattern now prints
+`correlationId`, `traceId`, and `spanId` together. `notification-service` is skipped
+here — it has no request entry point until its Kafka listener exists at Milestone 13,
+and Feign/WebClient header propagation is deferred to Milestone 10, when there's an
+actual inter-service call to propagate across.
+
+Next: Milestone 4 — Database Isolation & Dialect Testing (Flyway + Testcontainers).

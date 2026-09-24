@@ -1,0 +1,11 @@
+version: "3.8"
+
+# Milestone 3 scope: only the third-party tracing backend our services export spans to.
+# Containerizing our own services (Dockerfiles, resource limits, compose wiring between
+# them) is Milestone 9's job — this file grows there, not here.
+services:
+  zipkin:
+    image: openzipkin/zipkin:latest
+    container_name: spendwise-zipkin
+    ports:
+      - "9411:9411"
