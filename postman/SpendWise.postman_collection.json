@@ -1,0 +1,1326 @@
+{
+  "info": {
+    "name": "SpendWise",
+    "description": "Java 21 / Spring Boot 3.4+ microservices monorepo \u2014 one folder per service, each with its business endpoints plus Actuator and (pending) Metrics subfolders. Import once; folders for not-yet-built capabilities are pre-scaffolded so this collection doesn't need re-importing as later milestones land.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "configServerUrl",
+      "value": "http://localhost:8888"
+    },
+    {
+      "key": "authServiceUrl",
+      "value": "http://localhost:8081"
+    },
+    {
+      "key": "userServiceUrl",
+      "value": "http://localhost:8082"
+    },
+    {
+      "key": "transactionServiceUrl",
+      "value": "http://localhost:8083"
+    },
+    {
+      "key": "budgetServiceUrl",
+      "value": "http://localhost:8084"
+    },
+    {
+      "key": "notificationServiceUrl",
+      "value": "http://localhost:8085"
+    },
+    {
+      "key": "analyticsServiceUrl",
+      "value": "http://localhost:8086"
+    },
+    {
+      "key": "userId",
+      "value": "",
+      "description": "Paste an id from a Create User response"
+    },
+    {
+      "key": "categoryId",
+      "value": "",
+      "description": "Paste an id from a Create Category response"
+    },
+    {
+      "key": "credentialId",
+      "value": "",
+      "description": "Paste an id from a Register response"
+    }
+  ],
+  "item": [
+    {
+      "name": "Config Server",
+      "item": [
+        {
+          "name": "Fetch user-service config (dev)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{configServerUrl}}/user-service/dev",
+              "host": [
+                "{{configServerUrl}}"
+              ],
+              "path": [
+                "user-service",
+                "dev"
+              ]
+            },
+            "description": "Verifies the Config Server is actually serving centralized config. Try /auth-service/dev, /transaction-service/prod, etc. too."
+          },
+          "response": []
+        },
+        {
+          "name": "Actuator",
+          "item": [
+            {
+              "name": "Health",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{configServerUrl}}/actuator/health",
+                  "host": [
+                    "{{configServerUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "health"
+                  ]
+                },
+                "description": "Liveness/readiness aggregate health. Full detail is exposed by management.endpoint.health.show-details."
+              },
+              "response": []
+            },
+            {
+              "name": "Info",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{configServerUrl}}/actuator/info",
+                  "host": [
+                    "{{configServerUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "info"
+                  ]
+                },
+                "description": ""
+              },
+              "response": []
+            },
+            {
+              "name": "Refresh (single-instance)",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{configServerUrl}}/actuator/refresh",
+                  "host": [
+                    "{{configServerUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "refresh"
+                  ]
+                },
+                "description": "Re-fetches config from the Config Server for THIS instance only. Fleet-wide broadcast via Spring Cloud Bus arrives at Milestone 13."
+              },
+              "response": []
+            }
+          ],
+          "description": "Exposed since Milestone 2/3 (health, info, refresh)."
+        }
+      ],
+      "description": "Every other service bootstraps its configuration from here (Milestone 2). Start this first."
+    },
+    {
+      "name": "Auth Service",
+      "item": [
+        {
+          "name": "Business Endpoints",
+          "item": [
+            {
+              "name": "Register",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{authServiceUrl}}/api/v1/auth/register",
+                  "host": [
+                    "{{authServiceUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "auth",
+                    "register"
+                  ]
+                },
+                "description": "Creates a credential (BCrypt-hashed). 409-worthy duplicate email currently surfaces as a generic 500 \u2014 the global exception handler arrives at Milestone 7.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"jane.doe@spendwise.dev\",\n  \"rawPassword\": \"ChangeMe123!\"\n}"
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Get Credential By Id",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{authServiceUrl}}/api/v1/auth/{{credentialId}}",
+                  "host": [
+                    "{{authServiceUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "auth",
+                    "{{credentialId}}"
+                  ]
+                },
+                "description": "Login/JWT issuance isn't built yet \u2014 that's Milestone 6."
+              },
+              "response": []
+            }
+          ],
+          "description": ""
+        },
+        {
+          "name": "Actuator",
+          "item": [
+            {
+              "name": "Health",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{authServiceUrl}}/actuator/health",
+                  "host": [
+                    "{{authServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "health"
+                  ]
+                },
+                "description": "Liveness/readiness aggregate health. Full detail is exposed by management.endpoint.health.show-details."
+              },
+              "response": []
+            },
+            {
+              "name": "Info",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{authServiceUrl}}/actuator/info",
+                  "host": [
+                    "{{authServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "info"
+                  ]
+                },
+                "description": ""
+              },
+              "response": []
+            },
+            {
+              "name": "Refresh (single-instance)",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{authServiceUrl}}/actuator/refresh",
+                  "host": [
+                    "{{authServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "refresh"
+                  ]
+                },
+                "description": "Re-fetches config from the Config Server for THIS instance only. Fleet-wide broadcast via Spring Cloud Bus arrives at Milestone 13."
+              },
+              "response": []
+            }
+          ],
+          "description": "Exposed since Milestone 2/3 (health, info, refresh)."
+        },
+        {
+          "name": "Metrics",
+          "item": [
+            {
+              "name": "List Available Metrics",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{authServiceUrl}}/actuator/metrics",
+                  "host": [
+                    "{{authServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics"
+                  ]
+                },
+                "description": "'metrics' is not yet in management.endpoints.web.exposure.include. Will 404 until then."
+              },
+              "response": []
+            },
+            {
+              "name": "Metric Detail (jvm.memory.used)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{authServiceUrl}}/actuator/metrics/jvm.memory.used",
+                  "host": [
+                    "{{authServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "jvm.memory.used"
+                  ]
+                },
+                "description": "Example of drilling into one named metric once exposed."
+              },
+              "response": []
+            },
+            {
+              "name": "Prometheus Scrape Endpoint",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{authServiceUrl}}/actuator/prometheus",
+                  "host": [
+                    "{{authServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "prometheus"
+                  ]
+                },
+                "description": "requires micrometer-registry-prometheus + exposing 'prometheus' in the endpoint list. Placeholder so this collection doesn't need re-importing later."
+              },
+              "response": []
+            }
+          ],
+          "description": "Live since Milestone 5 (Prometheus registry + metrics/prometheus exposed)."
+        }
+      ],
+      "description": "Milestone 4: register + get-by-id only. Login/JWT/refresh arrive at Milestone 6."
+    },
+    {
+      "name": "User Service",
+      "item": [
+        {
+          "name": "Business Endpoints",
+          "item": [
+            {
+              "name": "Create User",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{userServiceUrl}}/api/v1/users",
+                  "host": [
+                    "{{userServiceUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "users"
+                  ]
+                },
+                "description": "",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"jane.doe@spendwise.dev\",\n  \"fullName\": \"Jane Doe\",\n  \"preferredCurrency\": \"INR\"\n}"
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Get User By Id",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{userServiceUrl}}/api/v1/users/{{userId}}",
+                  "host": [
+                    "{{userServiceUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "users",
+                    "{{userId}}"
+                  ]
+                },
+                "description": ""
+              },
+              "response": []
+            },
+            {
+              "name": "List Users (paginated + sorted)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{userServiceUrl}}/api/v1/users?page=0&size=10&sort=fullName,asc",
+                  "host": [
+                    "{{userServiceUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "users"
+                  ],
+                  "query": [
+                    {
+                      "key": "page",
+                      "value": "0"
+                    },
+                    {
+                      "key": "size",
+                      "value": "10"
+                    },
+                    {
+                      "key": "sort",
+                      "value": "fullName,asc"
+                    }
+                  ]
+                },
+                "description": "Pageable is bound automatically by Spring MVC. Try sort=createdAt,desc too."
+              },
+              "response": []
+            },
+            {
+              "name": "Update User (partial)",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{userServiceUrl}}/api/v1/users/{{userId}}",
+                  "host": [
+                    "{{userServiceUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "users",
+                    "{{userId}}"
+                  ]
+                },
+                "description": "Both fields nullable \u2014 omit one to leave it unchanged.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"fullName\": \"Jane A. Doe\",\n  \"preferredCurrency\": \"USD\"\n}"
+                }
+              },
+              "response": []
+            }
+          ],
+          "description": ""
+        },
+        {
+          "name": "Actuator",
+          "item": [
+            {
+              "name": "Health",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{userServiceUrl}}/actuator/health",
+                  "host": [
+                    "{{userServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "health"
+                  ]
+                },
+                "description": "Liveness/readiness aggregate health. Full detail is exposed by management.endpoint.health.show-details."
+              },
+              "response": []
+            },
+            {
+              "name": "Info",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{userServiceUrl}}/actuator/info",
+                  "host": [
+                    "{{userServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "info"
+                  ]
+                },
+                "description": ""
+              },
+              "response": []
+            },
+            {
+              "name": "Refresh (single-instance)",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{userServiceUrl}}/actuator/refresh",
+                  "host": [
+                    "{{userServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "refresh"
+                  ]
+                },
+                "description": "Re-fetches config from the Config Server for THIS instance only. Fleet-wide broadcast via Spring Cloud Bus arrives at Milestone 13."
+              },
+              "response": []
+            }
+          ],
+          "description": "Exposed since Milestone 2/3 (health, info, refresh)."
+        },
+        {
+          "name": "Metrics",
+          "item": [
+            {
+              "name": "List Available Metrics",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{userServiceUrl}}/actuator/metrics",
+                  "host": [
+                    "{{userServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics"
+                  ]
+                },
+                "description": "'metrics' is not yet in management.endpoints.web.exposure.include. Will 404 until then."
+              },
+              "response": []
+            },
+            {
+              "name": "Metric Detail (jvm.memory.used)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{userServiceUrl}}/actuator/metrics/jvm.memory.used",
+                  "host": [
+                    "{{userServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "jvm.memory.used"
+                  ]
+                },
+                "description": "Example of drilling into one named metric once exposed."
+              },
+              "response": []
+            },
+            {
+              "name": "Prometheus Scrape Endpoint",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{userServiceUrl}}/actuator/prometheus",
+                  "host": [
+                    "{{userServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "prometheus"
+                  ]
+                },
+                "description": "requires micrometer-registry-prometheus + exposing 'prometheus' in the endpoint list. Placeholder so this collection doesn't need re-importing later."
+              },
+              "response": []
+            }
+          ],
+          "description": "Live since Milestone 5 (Prometheus registry + metrics/prometheus exposed)."
+        }
+      ],
+      "description": "Milestone 4: full CRUD, database-backed (user_db)."
+    },
+    {
+      "name": "Transaction Service",
+      "item": [
+        {
+          "name": "Business Endpoints",
+          "item": [
+            {
+              "name": "Create Category",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{transactionServiceUrl}}/api/v1/categories",
+                  "host": [
+                    "{{transactionServiceUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "categories"
+                  ]
+                },
+                "description": "",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Electronics\"\n}"
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "List Categories",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{transactionServiceUrl}}/api/v1/categories",
+                  "host": [
+                    "{{transactionServiceUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "categories"
+                  ]
+                },
+                "description": ""
+              },
+              "response": []
+            },
+            {
+              "name": "Create Transaction",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{transactionServiceUrl}}/api/v1/transactions",
+                  "host": [
+                    "{{transactionServiceUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "transactions"
+                  ]
+                },
+                "description": "",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"userId\": \"{{userId}}\",\n  \"categoryId\": \"{{categoryId}}\",\n  \"amount\": 12000.0,\n  \"type\": \"EXPENSE\",\n  \"description\": \"Noise-cancelling headphones\",\n  \"transactionDate\": \"2026-09-10\"\n}"
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "List Transactions (filtered + paginated)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{transactionServiceUrl}}/api/v1/transactions?userId={{userId}}&categoryId={{categoryId}}&type=EXPENSE&fromDate=2026-09-01&toDate=2026-09-30&minAmount=100&maxAmount=50000&page=0&size=20&sort=transactionDate,desc",
+                  "host": [
+                    "{{transactionServiceUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "transactions"
+                  ],
+                  "query": [
+                    {
+                      "key": "userId",
+                      "value": "{{userId}}"
+                    },
+                    {
+                      "key": "categoryId",
+                      "value": "{{categoryId}}"
+                    },
+                    {
+                      "key": "type",
+                      "value": "EXPENSE"
+                    },
+                    {
+                      "key": "fromDate",
+                      "value": "2026-09-01"
+                    },
+                    {
+                      "key": "toDate",
+                      "value": "2026-09-30"
+                    },
+                    {
+                      "key": "minAmount",
+                      "value": "100"
+                    },
+                    {
+                      "key": "maxAmount",
+                      "value": "50000"
+                    },
+                    {
+                      "key": "page",
+                      "value": "0"
+                    },
+                    {
+                      "key": "size",
+                      "value": "20"
+                    },
+                    {
+                      "key": "sort",
+                      "value": "transactionDate,desc"
+                    }
+                  ]
+                },
+                "description": "All query params are optional and independently combinable \u2014 built on JPA Specifications (TransactionSpecifications). Delete any param you don't need."
+              },
+              "response": []
+            }
+          ],
+          "description": ""
+        },
+        {
+          "name": "Actuator",
+          "item": [
+            {
+              "name": "Health",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{transactionServiceUrl}}/actuator/health",
+                  "host": [
+                    "{{transactionServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "health"
+                  ]
+                },
+                "description": "Liveness/readiness aggregate health. Full detail is exposed by management.endpoint.health.show-details."
+              },
+              "response": []
+            },
+            {
+              "name": "Info",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{transactionServiceUrl}}/actuator/info",
+                  "host": [
+                    "{{transactionServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "info"
+                  ]
+                },
+                "description": ""
+              },
+              "response": []
+            },
+            {
+              "name": "Refresh (single-instance)",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{transactionServiceUrl}}/actuator/refresh",
+                  "host": [
+                    "{{transactionServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "refresh"
+                  ]
+                },
+                "description": "Re-fetches config from the Config Server for THIS instance only. Fleet-wide broadcast via Spring Cloud Bus arrives at Milestone 13."
+              },
+              "response": []
+            }
+          ],
+          "description": "Exposed since Milestone 2/3 (health, info, refresh)."
+        },
+        {
+          "name": "Metrics",
+          "item": [
+            {
+              "name": "List Available Metrics",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{transactionServiceUrl}}/actuator/metrics",
+                  "host": [
+                    "{{transactionServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics"
+                  ]
+                },
+                "description": "'metrics' is not yet in management.endpoints.web.exposure.include. Will 404 until then."
+              },
+              "response": []
+            },
+            {
+              "name": "Metric Detail (jvm.memory.used)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{transactionServiceUrl}}/actuator/metrics/jvm.memory.used",
+                  "host": [
+                    "{{transactionServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "jvm.memory.used"
+                  ]
+                },
+                "description": "Example of drilling into one named metric once exposed."
+              },
+              "response": []
+            },
+            {
+              "name": "Prometheus Scrape Endpoint",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{transactionServiceUrl}}/actuator/prometheus",
+                  "host": [
+                    "{{transactionServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "prometheus"
+                  ]
+                },
+                "description": "requires micrometer-registry-prometheus + exposing 'prometheus' in the endpoint list. Placeholder so this collection doesn't need re-importing later."
+              },
+              "response": []
+            }
+          ],
+          "description": "Live since Milestone 5 (Prometheus registry + metrics/prometheus exposed)."
+        }
+      ],
+      "description": "Milestone 4: ledger + categories, database-backed (transaction_db). Transaction->Category is lazy-loaded \u2014 deliberately set up for the N+1 chaos lab at Milestone 27."
+    },
+    {
+      "name": "Budget Service",
+      "item": [
+        {
+          "name": "Business Endpoints",
+          "item": [
+            {
+              "name": "Create Budget Cap",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{budgetServiceUrl}}/api/v1/budgets",
+                  "host": [
+                    "{{budgetServiceUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "budgets"
+                  ]
+                },
+                "description": "",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"userId\": \"{{userId}}\",\n  \"category\": \"Electronics\",\n  \"cappedAmount\": 10000.0,\n  \"periodMonth\": \"2026-09\"\n}"
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Get Monthly Summary",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{budgetServiceUrl}}/api/v1/budgets/{{userId}}/summary?periodMonth=2026-09",
+                  "host": [
+                    "{{budgetServiceUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "budgets",
+                    "{{userId}}",
+                    "summary"
+                  ],
+                  "query": [
+                    {
+                      "key": "periodMonth",
+                      "value": "2026-09"
+                    }
+                  ]
+                },
+                "description": "currentSpend is 0 for every budget until the Kafka-driven consumer lands at Milestone 18+ \u2014 that's expected, not a bug."
+              },
+              "response": []
+            }
+          ],
+          "description": ""
+        },
+        {
+          "name": "Actuator",
+          "item": [
+            {
+              "name": "Health",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{budgetServiceUrl}}/actuator/health",
+                  "host": [
+                    "{{budgetServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "health"
+                  ]
+                },
+                "description": "Liveness/readiness aggregate health. Full detail is exposed by management.endpoint.health.show-details."
+              },
+              "response": []
+            },
+            {
+              "name": "Info",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{budgetServiceUrl}}/actuator/info",
+                  "host": [
+                    "{{budgetServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "info"
+                  ]
+                },
+                "description": ""
+              },
+              "response": []
+            },
+            {
+              "name": "Refresh (single-instance)",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{budgetServiceUrl}}/actuator/refresh",
+                  "host": [
+                    "{{budgetServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "refresh"
+                  ]
+                },
+                "description": "Re-fetches config from the Config Server for THIS instance only. Fleet-wide broadcast via Spring Cloud Bus arrives at Milestone 13."
+              },
+              "response": []
+            }
+          ],
+          "description": "Exposed since Milestone 2/3 (health, info, refresh)."
+        },
+        {
+          "name": "Metrics",
+          "item": [
+            {
+              "name": "List Available Metrics",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{budgetServiceUrl}}/actuator/metrics",
+                  "host": [
+                    "{{budgetServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics"
+                  ]
+                },
+                "description": "'metrics' is not yet in management.endpoints.web.exposure.include. Will 404 until then."
+              },
+              "response": []
+            },
+            {
+              "name": "Metric Detail (jvm.memory.used)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{budgetServiceUrl}}/actuator/metrics/jvm.memory.used",
+                  "host": [
+                    "{{budgetServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "jvm.memory.used"
+                  ]
+                },
+                "description": "Example of drilling into one named metric once exposed."
+              },
+              "response": []
+            },
+            {
+              "name": "Prometheus Scrape Endpoint",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{budgetServiceUrl}}/actuator/prometheus",
+                  "host": [
+                    "{{budgetServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "prometheus"
+                  ]
+                },
+                "description": "requires micrometer-registry-prometheus + exposing 'prometheus' in the endpoint list. Placeholder so this collection doesn't need re-importing later."
+              },
+              "response": []
+            }
+          ],
+          "description": "Live since Milestone 5 (Prometheus registry + metrics/prometheus exposed)."
+        }
+      ],
+      "description": "Milestone 4: spending caps, database-backed (budget_db)."
+    },
+    {
+      "name": "Notification Service",
+      "item": [
+        {
+          "name": "Actuator",
+          "item": [
+            {
+              "name": "Health",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{notificationServiceUrl}}/actuator/health",
+                  "host": [
+                    "{{notificationServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "health"
+                  ]
+                },
+                "description": "Liveness/readiness aggregate health. Full detail is exposed by management.endpoint.health.show-details."
+              },
+              "response": []
+            },
+            {
+              "name": "Info",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{notificationServiceUrl}}/actuator/info",
+                  "host": [
+                    "{{notificationServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "info"
+                  ]
+                },
+                "description": ""
+              },
+              "response": []
+            },
+            {
+              "name": "Refresh (single-instance)",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{notificationServiceUrl}}/actuator/refresh",
+                  "host": [
+                    "{{notificationServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "refresh"
+                  ]
+                },
+                "description": "Re-fetches config from the Config Server for THIS instance only. Fleet-wide broadcast via Spring Cloud Bus arrives at Milestone 13."
+              },
+              "response": []
+            }
+          ],
+          "description": "NOT reachable yet \u2014 notification-service has no embedded web server yet (spring-boot-starter only, no spring-boot-starter-web). It gains an HTTP-reachable actuator once it needs one, or is exercised purely via its Kafka listener from Milestone 13 onward."
+        },
+        {
+          "name": "Metrics",
+          "item": [
+            {
+              "name": "List Available Metrics",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{notificationServiceUrl}}/actuator/metrics",
+                  "host": [
+                    "{{notificationServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics"
+                  ]
+                },
+                "description": "'metrics' is not yet in management.endpoints.web.exposure.include. Will 404 until then."
+              },
+              "response": []
+            },
+            {
+              "name": "Metric Detail (jvm.memory.used)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{notificationServiceUrl}}/actuator/metrics/jvm.memory.used",
+                  "host": [
+                    "{{notificationServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "jvm.memory.used"
+                  ]
+                },
+                "description": "Example of drilling into one named metric once exposed."
+              },
+              "response": []
+            },
+            {
+              "name": "Prometheus Scrape Endpoint",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{notificationServiceUrl}}/actuator/prometheus",
+                  "host": [
+                    "{{notificationServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "prometheus"
+                  ]
+                },
+                "description": "requires micrometer-registry-prometheus + exposing 'prometheus' in the endpoint list. Placeholder so this collection doesn't need re-importing later."
+              },
+              "response": []
+            }
+          ],
+          "description": "Live since Milestone 5 (Prometheus registry + metrics/prometheus exposed)."
+        }
+      ],
+      "description": "No REST surface by design (functional spec: async alert dispatcher only). Folder kept here so the collection's service list stays complete."
+    },
+    {
+      "name": "Analytics Service",
+      "item": [
+        {
+          "name": "Actuator",
+          "item": [
+            {
+              "name": "Health",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{analyticsServiceUrl}}/actuator/health",
+                  "host": [
+                    "{{analyticsServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "health"
+                  ]
+                },
+                "description": "Liveness/readiness aggregate health. Full detail is exposed by management.endpoint.health.show-details."
+              },
+              "response": []
+            },
+            {
+              "name": "Info",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{analyticsServiceUrl}}/actuator/info",
+                  "host": [
+                    "{{analyticsServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "info"
+                  ]
+                },
+                "description": ""
+              },
+              "response": []
+            },
+            {
+              "name": "Refresh (single-instance)",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{analyticsServiceUrl}}/actuator/refresh",
+                  "host": [
+                    "{{analyticsServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "refresh"
+                  ]
+                },
+                "description": "Re-fetches config from the Config Server for THIS instance only. Fleet-wide broadcast via Spring Cloud Bus arrives at Milestone 13."
+              },
+              "response": []
+            }
+          ],
+          "description": "Exposed since Milestone 2/3 (health, info, refresh)."
+        },
+        {
+          "name": "Metrics",
+          "item": [
+            {
+              "name": "List Available Metrics",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{analyticsServiceUrl}}/actuator/metrics",
+                  "host": [
+                    "{{analyticsServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics"
+                  ]
+                },
+                "description": "'metrics' is not yet in management.endpoints.web.exposure.include. Will 404 until then."
+              },
+              "response": []
+            },
+            {
+              "name": "Metric Detail (jvm.memory.used)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{analyticsServiceUrl}}/actuator/metrics/jvm.memory.used",
+                  "host": [
+                    "{{analyticsServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "jvm.memory.used"
+                  ]
+                },
+                "description": "Example of drilling into one named metric once exposed."
+              },
+              "response": []
+            },
+            {
+              "name": "Prometheus Scrape Endpoint",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{analyticsServiceUrl}}/actuator/prometheus",
+                  "host": [
+                    "{{analyticsServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "prometheus"
+                  ]
+                },
+                "description": "requires micrometer-registry-prometheus + exposing 'prometheus' in the endpoint list. Placeholder so this collection doesn't need re-importing later."
+              },
+              "response": []
+            }
+          ],
+          "description": "Live since Milestone 5 (Prometheus registry + metrics/prometheus exposed)."
+        }
+      ],
+      "description": "No business endpoints yet \u2014 CQRS read-model projections arrive at Milestone 23, and the service itself is rebuilt on WebFlux + R2DBC at Milestone 15. Actuator is already live since it's one of the 5 REST-capable services from Milestone 3."
+    }
+  ]
+}

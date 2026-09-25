@@ -63,14 +63,20 @@ mvn -pl user-service spring-boot:run
 Config Server runs in `native` mode, serving property files from
 `config-server/src/main/resources/config-repo/` — no external Git repo or broker required.
 
-Zipkin (the tracing backend, Milestone 3) and PostgreSQL (Milestone 4) run via Docker
-Compose:
+Zipkin (Milestone 3), PostgreSQL (Milestone 4), and Prometheus + Grafana
+(Milestone 5) all run via Docker Compose:
 
 ```bash
-docker compose up -d zipkin postgres
-# view traces at http://localhost:9411
+docker compose up -d zipkin postgres prometheus grafana
+# traces:      http://localhost:9411
+# metrics:     http://localhost:9090 (Prometheus)
+# dashboards:  http://localhost:3000 (Grafana, admin / spendwise)
 # postgres exposes 4 isolated databases: auth_db, user_db, transaction_db, budget_db
 ```
+
+A Postman collection covering every live endpoint (business + Actuator + Metrics,
+one folder per service) lives at `postman/SpendWise.postman_collection.json` —
+import it directly.
 
 ## Status
 
@@ -114,5 +120,21 @@ surface as generic 500s — that's expected at this stage, not a bug.
 `notification_db` and `analytics_db` are deferred (needed at Milestone 19 and rebuilt
 on R2DBC/Mongo at Milestone 15, respectively).
 
-Next: Milestone 5 — Deep Observability Probes & Telemetry Dashboards (Actuator health
-probes, Prometheus, Grafana).
+**Milestone 5 (Phase 1) complete** — Deep Observability Probes & Telemetry
+Dashboards. `management.endpoints.web.exposure.include` now adds `metrics` and
+`prometheus` (`micrometer-registry-prometheus` added to every service). Liveness
+health now includes a genuine `DeadlockHealthIndicator` (spendwise-common,
+`ThreadMXBean.findDeadlockedThreads()` — the same mechanism a manual `jstack`
+diagnosis would use, exposed continuously) alongside the default `livenessState`;
+readiness on the 4 DB-backed services now includes the `db` indicator, so a dead
+Postgres connection actually fails readiness, not just liveness. Prometheus scrapes
+all 7 services' `/actuator/prometheus` (via `host.docker.internal`, since our
+services aren't containerized until Milestone 9) and evaluates one alerting rule,
+`HighHttp5xxErrorRate` (>5% 5xx rate over a 5-minute window, sustained 2+ minutes) —
+wiring an actual notification channel (Alertmanager → Slack/email) isn't in this
+milestone's scope, only defining the rule itself. Grafana auto-provisions the
+Prometheus datasource and one starter dashboard (request rate, 5xx error rate, JVM
+heap — all per service).
+
+Next: Milestone 6 — Edge Gateway Security (Spring Security 6 + stateless JWT auth
+server, API Gateway).

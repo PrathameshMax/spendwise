@@ -1,6 +1,7 @@
-# Milestone 3/4 scope: only the third-party backends our services depend on (tracing,
-# database). Containerizing our own services (Dockerfiles, resource limits, compose
-# wiring between them) is Milestone 9's job — this file grows there, not here.
+# Milestone 3/4/5 scope: only the third-party backends our services depend on
+# (tracing, database, metrics/dashboards). Containerizing our own services
+# (Dockerfiles, resource limits, compose wiring between them) is Milestone 9's
+# job — this file grows there, not here.
 services:
   zipkin:
     image: openzipkin/zipkin:latest
@@ -20,5 +21,30 @@ services:
       - spendwise-postgres-data:/var/lib/postgresql/data
       - ./infra/postgres-init:/docker-entrypoint-initdb.d
 
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: spendwise-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./infra/prometheus/alerts.yml:/etc/prometheus/alerts.yml
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: spendwise-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: spendwise
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning
+      - spendwise-grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+
 volumes:
   spendwise-postgres-data:
+  spendwise-grafana-data:

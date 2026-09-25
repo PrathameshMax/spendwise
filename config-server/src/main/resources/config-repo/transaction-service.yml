@@ -5,3 +5,10 @@ spring:
     password: ${DB_PASSWORD:spendwise}
   flyway:
     enabled: true
+
+management:
+  endpoint:
+    health:
+      group:
+        readiness:
+          include: readinessState,db
