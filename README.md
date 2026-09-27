@@ -136,5 +136,20 @@ milestone's scope, only defining the rule itself. Grafana auto-provisions the
 Prometheus datasource and one starter dashboard (request rate, 5xx error rate, JVM
 heap — all per service).
 
+**Milestone 5 hotfix** — the `liveness` health group (`livenessState,deadlock`) is
+defined once, globally, in `config-repo/application.yml`, so it applies to every
+service registered with the Config Server — including `notification-service`, which
+has no web-facing endpoints yet. `deadlockHealthIndicator` had only been registered
+in `HealthConfig` for auth/user/transaction/budget/analytics-service, not
+`notification-service`. Spring Boot's default
+`management.endpoint.health.validate-group-membership=true` fails application
+startup — not just the health endpoint — when a named group member has no matching
+registered contributor, which is exactly what happened:
+`Included health contributor 'deadlock' in group 'liveness' does not exist`.
+Fixed by adding the same `HealthConfig` bean registration to `notification-service`
+that the other five services already have; deadlock detection is JVM-level, not
+HTTP-level, so the service needing no web layer yet doesn't exempt it from the
+group.
+
 Next: Milestone 6 — Edge Gateway Security (Spring Security 6 + stateless JWT auth
 server, API Gateway).
