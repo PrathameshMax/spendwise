@@ -13,7 +13,8 @@
     <artifactId>spendwise-common</artifactId>
     <packaging>jar</packaging>
     <name>SpendWise :: Common</name>
-    <description>Cross-cutting DTOs, exception types, and the correlation-ID filter shared by every service</description>
+    <description>Cross-cutting DTOs, exception types, correlation-ID filter, and the signed
+        user-context filter (Milestone 6) shared by every service</description>
 
     <dependencies>
         <dependency>
@@ -28,6 +29,10 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
         </dependency>
     </dependencies>
 </project>

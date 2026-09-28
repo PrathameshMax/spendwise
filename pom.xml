@@ -20,9 +20,10 @@
         <module>budget-service</module>
         <module>notification-service</module>
         <module>analytics-service</module>
-        <!-- api-gateway and discovery-server are added when Milestones 6 and 10 introduce
-             them — an empty shell of a gateway/registry has no meaningful content before
-             those milestones' dependencies exist. -->
+        <module>api-gateway</module>
+        <!-- discovery-server is added when Milestone 10 introduces it — an empty shell
+             of a registry has no meaningful content before that milestone's dependencies
+             exist. -->
     </modules>
 
     <properties>

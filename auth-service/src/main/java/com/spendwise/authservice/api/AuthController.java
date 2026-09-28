@@ -13,8 +13,12 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.UUID;
 
 /**
- * Register/lookup only at this milestone. Login, JWT issuance, and refresh-token
- * rotation require the OAuth2 Authorization Server wiring introduced in Milestone 6.
+ * auth-service's public surface (Milestone 6): register and login both mint an
+ * access/refresh token pair, and refresh rotates a still-valid refresh token for
+ * a new pair. The API Gateway is what turns {@code refreshToken} into a secure,
+ * HttpOnly cookie and strips it back out of the JSON body before it reaches a
+ * browser client — this controller only knows about the token pair itself, not
+ * the cookie transport (see api-gateway's RouteConfig / RefreshCookieSupport).
  */
 @RestController
 @RequestMapping("/api/v1/auth")
@@ -27,9 +31,19 @@ public class AuthController {
     }
 
     @PostMapping("/register")
-    public ResponseEntity<CredentialResponse> register(@RequestBody RegisterRequest request) {
-        CredentialResponse response = authService.register(request);
+    public ResponseEntity<TokenPairResponse> register(@RequestBody RegisterRequest request) {
+        TokenPairResponse response = authService.register(request);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
+    @PostMapping("/login")
+    public ResponseEntity<TokenPairResponse> login(@RequestBody LoginRequest request) {
+        return ResponseEntity.ok(authService.login(request));
+    }
+
+    @PostMapping("/refresh")
+    public ResponseEntity<TokenPairResponse> refresh(@RequestBody RefreshRequest request) {
+        return ResponseEntity.ok(authService.refresh(request));
     }
 
     @GetMapping("/{id}")

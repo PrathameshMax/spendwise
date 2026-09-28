@@ -47,6 +47,14 @@
       "key": "credentialId",
       "value": "",
       "description": "Paste an id from a Register response"
+    },
+    {
+      "key": "apiGatewayUrl",
+      "value": "http://localhost:8080"
+    },
+    {
+      "key": "accessToken",
+      "value": ""
     }
   ],
   "item": [
@@ -172,7 +180,23 @@
                   "raw": "{\n  \"email\": \"jane.doe@spendwise.dev\",\n  \"rawPassword\": \"ChangeMe123!\"\n}"
                 }
               },
-              "response": []
+              "response": [],
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (pm.response.code === 200 || pm.response.code === 201) {",
+                      "    const json = pm.response.json();",
+                      "    if (json.accessToken) {",
+                      "        pm.collectionVariables.set('accessToken', json.accessToken);",
+                      "    }",
+                      "}"
+                    ]
+                  }
+                }
+              ]
             },
             {
               "name": "Get Credential By Id",
@@ -194,6 +218,96 @@
                 "description": "Login/JWT issuance isn't built yet \u2014 that's Milestone 6."
               },
               "response": []
+            },
+            {
+              "name": "Login",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{authServiceUrl}}/api/v1/auth/login",
+                  "host": [
+                    "{{authServiceUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "auth",
+                    "login"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"jane.doe@example.com\",\n  \"rawPassword\": \"ChangeMe123!\"\n}"
+                },
+                "description": "Milestone 6: authenticates against Credential and mints a fresh access/refresh token pair."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (pm.response.code === 200 || pm.response.code === 201) {",
+                      "    const json = pm.response.json();",
+                      "    if (json.accessToken) {",
+                      "        pm.collectionVariables.set('accessToken', json.accessToken);",
+                      "    }",
+                      "}"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Refresh",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{authServiceUrl}}/api/v1/auth/refresh",
+                  "host": [
+                    "{{authServiceUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "auth",
+                    "refresh"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"refreshToken\": \"<paste refreshToken from Register/Login response>\"\n}"
+                },
+                "description": "Milestone 6: rotates a still-valid refresh token for a new pair; rejects an already-rotated-out token. When called through the API Gateway instead, the refresh token is read from the spendwise_refresh_token cookie, not this body field."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (pm.response.code === 200 || pm.response.code === 201) {",
+                      "    const json = pm.response.json();",
+                      "    if (json.accessToken) {",
+                      "        pm.collectionVariables.set('accessToken', json.accessToken);",
+                      "    }",
+                      "}"
+                    ]
+                  }
+                }
+              ]
             }
           ],
           "description": ""
@@ -327,6 +441,364 @@
         }
       ],
       "description": "Milestone 4: register + get-by-id only. Login/JWT/refresh arrive at Milestone 6."
+    },
+    {
+      "name": "API Gateway",
+      "item": [
+        {
+          "name": "Auth (via Gateway)",
+          "item": [
+            {
+              "name": "Register",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/api/v1/auth/register",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "auth",
+                    "register"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"gateway.user@example.com\",\n  \"rawPassword\": \"ChangeMe123!\"\n}"
+                },
+                "description": "Milestone 6: routed through api-gateway's auth-service-issuance route. The Gateway strips refreshToken out of this response and sets it as an HttpOnly spendwise_refresh_token cookie instead."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (pm.response.code === 200 || pm.response.code === 201) {",
+                      "    const json = pm.response.json();",
+                      "    if (json.accessToken) {",
+                      "        pm.collectionVariables.set('accessToken', json.accessToken);",
+                      "    }",
+                      "}"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Login",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/api/v1/auth/login",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "auth",
+                    "login"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"gateway.user@example.com\",\n  \"rawPassword\": \"ChangeMe123!\"\n}"
+                },
+                "description": "Milestone 6: routed through api-gateway's auth-service-issuance route; same cookie-rotation behavior as Register."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (pm.response.code === 200 || pm.response.code === 201) {",
+                      "    const json = pm.response.json();",
+                      "    if (json.accessToken) {",
+                      "        pm.collectionVariables.set('accessToken', json.accessToken);",
+                      "    }",
+                      "}"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Refresh",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/api/v1/auth/refresh",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "auth",
+                    "refresh"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{}"
+                },
+                "description": "Milestone 6: routed through api-gateway's auth-service-refresh route. Send with no body \u2014 the Gateway reads the refresh token from the spendwise_refresh_token cookie (set by a prior Register/Login through the Gateway) and injects it into the request it forwards to auth-service, then rotates the cookie again on the response."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (pm.response.code === 200 || pm.response.code === 201) {",
+                      "    const json = pm.response.json();",
+                      "    if (json.accessToken) {",
+                      "        pm.collectionVariables.set('accessToken', json.accessToken);",
+                      "    }",
+                      "}"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Business Endpoints (via Gateway)",
+          "item": [
+            {
+              "name": "List Users",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/api/v1/users",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "users"
+                  ]
+                },
+                "description": "Milestone 6: JWT-protected passthrough to user-service. Requires {{accessToken}} (captured automatically by the Auth (via Gateway) requests) \u2014 the Gateway validates it, then forwards a signed X-User-Context header that user-service trusts instead of re-validating the JWT."
+              }
+            },
+            {
+              "name": "List Transactions",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/api/v1/transactions?userId={{userId}}",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "transactions"
+                  ],
+                  "query": [
+                    {
+                      "key": "userId",
+                      "value": "{{userId}}"
+                    }
+                  ]
+                },
+                "description": "Milestone 6: JWT-protected passthrough to transaction-service via the Gateway."
+              }
+            },
+            {
+              "name": "Budget Summary",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/api/v1/budgets/{{userId}}/summary?periodMonth=2026-09",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "budgets",
+                    "{{userId}}",
+                    "summary"
+                  ],
+                  "query": [
+                    {
+                      "key": "periodMonth",
+                      "value": "2026-09"
+                    }
+                  ]
+                },
+                "description": "Milestone 6: JWT-protected passthrough to budget-service via the Gateway."
+              }
+            }
+          ]
+        },
+        {
+          "name": "Actuator",
+          "item": [
+            {
+              "name": "Health",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/actuator/health",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "health"
+                  ]
+                },
+                "description": "Liveness/readiness aggregate health. Full detail is exposed by management.endpoint.health.show-details."
+              },
+              "response": []
+            },
+            {
+              "name": "Info",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/actuator/info",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "info"
+                  ]
+                },
+                "description": ""
+              },
+              "response": []
+            },
+            {
+              "name": "Refresh (single-instance)",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/actuator/refresh",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "refresh"
+                  ]
+                },
+                "description": "Re-fetches config from the Config Server for THIS instance only. Fleet-wide broadcast via Spring Cloud Bus arrives at Milestone 13."
+              },
+              "response": []
+            }
+          ],
+          "description": "Exposed since Milestone 2/3 (health, info, refresh)."
+        },
+        {
+          "name": "Metrics",
+          "item": [
+            {
+              "name": "List Available Metrics",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/actuator/metrics",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics"
+                  ]
+                },
+                "description": "'metrics' is not yet in management.endpoints.web.exposure.include. Will 404 until then."
+              },
+              "response": []
+            },
+            {
+              "name": "Metric Detail (jvm.memory.used)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/actuator/metrics/jvm.memory.used",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "jvm.memory.used"
+                  ]
+                },
+                "description": "Example of drilling into one named metric once exposed."
+              },
+              "response": []
+            },
+            {
+              "name": "Prometheus Scrape Endpoint",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/actuator/prometheus",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "prometheus"
+                  ]
+                },
+                "description": "requires micrometer-registry-prometheus + exposing 'prometheus' in the endpoint list. Placeholder so this collection doesn't need re-importing later."
+              },
+              "response": []
+            }
+          ],
+          "description": "Live since Milestone 5 (Prometheus registry + metrics/prometheus exposed)."
+        }
+      ]
     },
     {
       "name": "User Service",
