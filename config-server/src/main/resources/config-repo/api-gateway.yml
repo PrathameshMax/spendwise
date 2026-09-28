@@ -1,0 +1,12 @@
+spendwise:
+  gateway:
+    routes:
+      auth-service: http://localhost:8081
+      user-service: http://localhost:8082
+      transaction-service: http://localhost:8083
+      budget-service: http://localhost:8084
+  security:
+    jwk-set-uri: http://localhost:8081/oauth2/jwks
+    refresh-cookie-name: spendwise_refresh_token
+    refresh-cookie-path: /api/v1/auth/refresh
+    refresh-cookie-max-age-seconds: 604800

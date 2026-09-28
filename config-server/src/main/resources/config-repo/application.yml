@@ -28,3 +28,10 @@ spring:
     open-in-view: false
     hibernate:
       ddl-auto: validate
+
+spendwise:
+  security:
+    # Shared only between the API Gateway (signs) and business services (verify) —
+    # HMAC key for the X-User-Context header (Milestone 6). Override via env var
+    # in any real deployment; the default here is dev-only.
+    user-context-secret: ${SPENDWISE_USER_CONTEXT_SECRET:dev-only-shared-secret-change-for-real-deployments}

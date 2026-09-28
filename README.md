@@ -11,16 +11,16 @@ Roadmaps: `SpendWise_Functional_Roadmap_v2` and `SpendWise_Technical_Roadmap_v2`
 
 | Module | Role |
 |---|---|
-| `spendwise-common` | Shared DTOs, exception hierarchy, correlation-ID filter |
-| `auth-service` | Identity issuance, JWT auth |
+| `spendwise-common` | Shared DTOs, exception hierarchy, correlation-ID filter, signed user-context filter |
+| `api-gateway` | Edge entry point — OAuth2 resource server, JWT validation, refresh-cookie rotation |
+| `auth-service` | Identity issuance — OAuth2-style Authorization Server, JWT minting |
 | `user-service` | User profiles and preferences |
 | `transaction-service` | Ledger — income/expense, categories |
 | `budget-service` | Spending caps, budget tracking |
 | `notification-service` | Async alert dispatch (Kafka consumer, no REST) |
 | `analytics-service` | CQRS read-side dashboard projections |
 
-`api-gateway` and `discovery-server` are added when Milestones 6 and 10 respectively
-introduce them.
+`discovery-server` is added when Milestone 10 introduces it.
 
 ## Path to Polyrepo
 
@@ -57,8 +57,20 @@ its configuration from it:
 mvn clean install
 mvn -pl config-server spring-boot:run
 # in a separate terminal, once config-server is listening on 8888:
+mvn -pl auth-service spring-boot:run
+# api-gateway needs auth-service's /oauth2/jwks reachable before it can validate
+# any JWT, so start auth-service first; then, in further terminals:
+mvn -pl api-gateway spring-boot:run
 mvn -pl user-service spring-boot:run
 ```
+
+As of Milestone 6, `api-gateway` (port 8080) is the intended entry point for every
+authenticated call — `register`/`login`/`refresh` and the `user`/`transaction`/`budget`
+routes should be called through it, not directly against each service's own port.
+Each service's own port is still open directly (no service mesh/network policy
+exists yet to prevent it — see the Milestone 6 status note below), which remains
+useful for hitting Actuator/metrics endpoints per service, exactly as the Postman
+collection already does.
 
 Config Server runs in `native` mode, serving property files from
 `config-server/src/main/resources/config-repo/` — no external Git repo or broker required.
@@ -136,5 +148,55 @@ milestone's scope, only defining the rule itself. Grafana auto-provisions the
 Prometheus datasource and one starter dashboard (request rate, 5xx error rate, JVM
 heap — all per service).
 
-Next: Milestone 6 — Edge Gateway Security (Spring Security 6 + stateless JWT auth
-server, API Gateway).
+**Milestone 5 hotfix** — the `liveness` health group (`livenessState,deadlock`) is
+defined once, globally, in `config-repo/application.yml`, so it applies to every
+service registered with the Config Server — including `notification-service`, which
+has no web-facing endpoints yet. `deadlockHealthIndicator` had only been registered
+in `HealthConfig` for auth/user/transaction/budget/analytics-service, not
+`notification-service`. Spring Boot's default
+`management.endpoint.health.validate-group-membership=true` fails application
+startup — not just the health endpoint — when a named group member has no matching
+registered contributor, which is exactly what happened:
+`Included health contributor 'deadlock' in group 'liveness' does not exist`.
+Fixed by adding the same `HealthConfig` bean registration to `notification-service`
+that the other five services already have; deadlock detection is JVM-level, not
+HTTP-level, so the service needing no web layer yet doesn't exempt it from the
+group.
+
+**Milestone 6 (Phase 2) complete** — Edge Gateway Security (Spring Security 6 +
+stateless JWT Authorization Server). `auth-service` is now a self-contained
+OAuth2-style Authorization Server: it generates its own RSA key pair at startup
+(`JwtKeyConfig`), serves the public half at `/oauth2/jwks`, and `register`/`login`
+both mint a short-lived access token (15 min) plus a refresh token (7 days). Refresh
+tokens are tracked in a new `refresh_tokens` table by their `jti` claim, so
+`/api/v1/auth/refresh` can detect and reject a token that was already rotated out —
+a real reuse/replay signal, not just an expiry check.
+
+The new `api-gateway` module (Spring Cloud Gateway, WebFlux/reactive — Spring Cloud
+Gateway has no servlet-based variant) is the platform's first edge component. As an
+OAuth2 Resource Server it validates every inbound JWT against auth-service's JWKS
+endpoint before routing to `user-service`, `transaction-service`, or
+`budget-service` (`notification-service` and `analytics-service` have no REST
+surface yet, so they aren't routed). Two custom filter pipelines do the rest of
+the Implementation spec: `RefreshCookieSupport` rewrites `register`/`login`/`refresh`
+request and response bodies so the refresh token travels only as an HttpOnly,
+Secure, `SameSite=Strict` cookie — auth-service itself never sees a cookie, only
+the `{accessToken, refreshToken}` JSON body it always returned — and
+`UserContextPropagationGlobalFilter` extracts `{userId, email}` from the validated
+JWT, HMAC-signs it, and forwards it as `X-User-Context`, after first stripping any
+inbound copy a caller might have forged. Business services verify that signature
+via a new shared `UserContextFilter` (spendwise-common) instead of decoding the JWT
+themselves — exactly the "trust the Gateway" model the milestone calls for. Access
+tokens carry no role/claim list, since `Credential` has no roles concept in the
+domain yet; role-based vs. claim-based authorization (Q32) stays a documented
+interview topic until that concept exists. `CorrelationIdGlobalFilter` is a
+WebFlux-native reimplementation of the Milestone 3 correlation-ID filter, since the
+servlet-based original can't run on Gateway's Netty runtime. `api-gateway` also
+picked up the Milestone 5 observability baseline (Prometheus scrape target,
+`DeadlockHealthIndicator` registration — a service without it fails startup exactly
+as `notification-service` did before its Milestone 5 hotfix) so the new module
+isn't a monitoring blind spot. Each service still exposes its own port directly for
+now (no network policy prevents bypassing the Gateway) — that hardening isn't in
+this milestone's stated scope.
+
+Next: Milestone 7 — API Contract & Documentation Governance.

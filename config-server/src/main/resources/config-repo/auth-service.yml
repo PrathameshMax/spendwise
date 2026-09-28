@@ -12,3 +12,10 @@ management:
       group:
         readiness:
           include: readinessState,db
+
+spendwise:
+  security:
+    # Milestone 6 — auth-service's own token lifetimes, distinct from the
+    # Gateway-side refresh-cookie settings in config-repo/api-gateway.yml.
+    access-token-ttl-seconds: 900
+    refresh-token-ttl-seconds: 604800

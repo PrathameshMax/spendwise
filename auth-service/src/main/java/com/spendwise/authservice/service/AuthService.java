@@ -1,9 +1,14 @@
 package com.spendwise.authservice.service;
 
 import com.spendwise.authservice.api.CredentialResponse;
+import com.spendwise.authservice.api.LoginRequest;
+import com.spendwise.authservice.api.RefreshRequest;
 import com.spendwise.authservice.api.RegisterRequest;
+import com.spendwise.authservice.api.TokenPairResponse;
 import com.spendwise.authservice.domain.Credential;
 import com.spendwise.authservice.domain.CredentialRepository;
+import com.spendwise.authservice.exception.InvalidCredentialsException;
+import com.spendwise.authservice.security.TokenService;
 import com.spendwise.common.exception.DuplicateResourceException;
 import com.spendwise.common.exception.ResourceNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -17,20 +22,39 @@ public class AuthService {
 
     private final CredentialRepository credentialRepository;
     private final PasswordEncoder passwordEncoder;
+    private final TokenService tokenService;
 
-    public AuthService(CredentialRepository credentialRepository, PasswordEncoder passwordEncoder) {
+    public AuthService(CredentialRepository credentialRepository,
+                        PasswordEncoder passwordEncoder,
+                        TokenService tokenService) {
         this.credentialRepository = credentialRepository;
         this.passwordEncoder = passwordEncoder;
+        this.tokenService = tokenService;
     }
 
     @Transactional
-    public CredentialResponse register(RegisterRequest request) {
+    public TokenPairResponse register(RegisterRequest request) {
         if (credentialRepository.existsByEmail(request.email())) {
             throw new DuplicateResourceException("Credential", "email", request.email());
         }
         Credential credential = new Credential(request.email(), passwordEncoder.encode(request.rawPassword()));
         Credential saved = credentialRepository.save(credential);
-        return toResponse(saved);
+        return toTokenPairResponse(tokenService.issueTokenPair(saved));
+    }
+
+    @Transactional
+    public TokenPairResponse login(LoginRequest request) {
+        Credential credential = credentialRepository.findByEmail(request.email())
+                .orElseThrow(InvalidCredentialsException::new);
+        if (!passwordEncoder.matches(request.rawPassword(), credential.getPasswordHash())) {
+            throw new InvalidCredentialsException();
+        }
+        return toTokenPairResponse(tokenService.issueTokenPair(credential));
+    }
+
+    @Transactional
+    public TokenPairResponse refresh(RefreshRequest request) {
+        return toTokenPairResponse(tokenService.refresh(request.refreshToken()));
     }
 
     @Transactional(readOnly = true)
@@ -42,5 +66,9 @@ public class AuthService {
 
     private CredentialResponse toResponse(Credential credential) {
         return new CredentialResponse(credential.getId(), credential.getEmail(), credential.getCreatedAt());
+    }
+
+    private TokenPairResponse toTokenPairResponse(TokenService.TokenPair pair) {
+        return TokenPairResponse.bearer(pair.accessToken(), pair.refreshToken(), pair.accessTokenExpiresInSeconds());
     }
 }
