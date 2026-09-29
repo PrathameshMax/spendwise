@@ -313,6 +313,46 @@
           "description": ""
         },
         {
+          "name": "Docs",
+          "item": [
+            {
+              "name": "OpenAPI Document (/v3/api-docs)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{authServiceUrl}}/v3/api-docs",
+                  "host": [
+                    "{{authServiceUrl}}"
+                  ],
+                  "path": [
+                    "v3",
+                    "api-docs"
+                  ]
+                },
+                "description": "Milestone 7: springdoc-openapi's generated OpenAPI document, always in sync with this service's live controller annotations."
+              }
+            },
+            {
+              "name": "Swagger UI (browser only)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{authServiceUrl}}/swagger-ui.html",
+                  "host": [
+                    "{{authServiceUrl}}"
+                  ],
+                  "path": [
+                    "swagger-ui.html"
+                  ]
+                },
+                "description": "Milestone 7: open this URL in a browser, not Postman, for the interactive Swagger UI. Included here for discoverability."
+              }
+            }
+          ]
+        },
+        {
           "name": "Actuator",
           "item": [
             {
@@ -672,6 +712,142 @@
           ]
         },
         {
+          "name": "Docs (aggregated)",
+          "item": [
+            {
+              "name": "OpenAPI Document \u2014 auth-service (via Gateway)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/v3/api-docs/auth-service",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "v3",
+                    "api-docs",
+                    "auth-service"
+                  ]
+                },
+                "description": "Milestone 7: auth-service's OpenAPI document, proxied same-origin through the Gateway's docs-proxy route so Swagger UI's browser JS avoids a cross-origin fetch."
+              }
+            },
+            {
+              "name": "OpenAPI Document \u2014 user-service (via Gateway)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/v3/api-docs/user-service",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "v3",
+                    "api-docs",
+                    "user-service"
+                  ]
+                },
+                "description": "Milestone 7: user-service's OpenAPI document, proxied same-origin through the Gateway's docs-proxy route so Swagger UI's browser JS avoids a cross-origin fetch."
+              }
+            },
+            {
+              "name": "OpenAPI Document \u2014 transaction-service (via Gateway)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/v3/api-docs/transaction-service",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "v3",
+                    "api-docs",
+                    "transaction-service"
+                  ]
+                },
+                "description": "Milestone 7: transaction-service's OpenAPI document, proxied same-origin through the Gateway's docs-proxy route so Swagger UI's browser JS avoids a cross-origin fetch."
+              }
+            },
+            {
+              "name": "OpenAPI Document \u2014 budget-service (via Gateway)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/v3/api-docs/budget-service",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "v3",
+                    "api-docs",
+                    "budget-service"
+                  ]
+                },
+                "description": "Milestone 7: budget-service's OpenAPI document, proxied same-origin through the Gateway's docs-proxy route so Swagger UI's browser JS avoids a cross-origin fetch."
+              }
+            },
+            {
+              "name": "OpenAPI Document \u2014 notification-service (via Gateway)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/v3/api-docs/notification-service",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "v3",
+                    "api-docs",
+                    "notification-service"
+                  ]
+                },
+                "description": "Milestone 7: notification-service's OpenAPI document, proxied same-origin through the Gateway's docs-proxy route so Swagger UI's browser JS avoids a cross-origin fetch."
+              }
+            },
+            {
+              "name": "OpenAPI Document \u2014 analytics-service (via Gateway)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/v3/api-docs/analytics-service",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "v3",
+                    "api-docs",
+                    "analytics-service"
+                  ]
+                },
+                "description": "Milestone 7: analytics-service's OpenAPI document, proxied same-origin through the Gateway's docs-proxy route so Swagger UI's browser JS avoids a cross-origin fetch."
+              }
+            },
+            {
+              "name": "Swagger UI \u2014 aggregated (browser only)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/swagger-ui.html",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "swagger-ui.html"
+                  ]
+                },
+                "description": "Milestone 7: open this URL in a browser for one Swagger UI with a dropdown covering all six services' OpenAPI documents."
+              }
+            }
+          ]
+        },
+        {
           "name": "Actuator",
           "item": [
             {
@@ -922,6 +1098,46 @@
             }
           ],
           "description": ""
+        },
+        {
+          "name": "Docs",
+          "item": [
+            {
+              "name": "OpenAPI Document (/v3/api-docs)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{userServiceUrl}}/v3/api-docs",
+                  "host": [
+                    "{{userServiceUrl}}"
+                  ],
+                  "path": [
+                    "v3",
+                    "api-docs"
+                  ]
+                },
+                "description": "Milestone 7: springdoc-openapi's generated OpenAPI document, always in sync with this service's live controller annotations."
+              }
+            },
+            {
+              "name": "Swagger UI (browser only)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{userServiceUrl}}/swagger-ui.html",
+                  "host": [
+                    "{{userServiceUrl}}"
+                  ],
+                  "path": [
+                    "swagger-ui.html"
+                  ]
+                },
+                "description": "Milestone 7: open this URL in a browser, not Postman, for the interactive Swagger UI. Included here for discoverability."
+              }
+            }
+          ]
         },
         {
           "name": "Actuator",
@@ -1203,6 +1419,46 @@
           "description": ""
         },
         {
+          "name": "Docs",
+          "item": [
+            {
+              "name": "OpenAPI Document (/v3/api-docs)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{transactionServiceUrl}}/v3/api-docs",
+                  "host": [
+                    "{{transactionServiceUrl}}"
+                  ],
+                  "path": [
+                    "v3",
+                    "api-docs"
+                  ]
+                },
+                "description": "Milestone 7: springdoc-openapi's generated OpenAPI document, always in sync with this service's live controller annotations."
+              }
+            },
+            {
+              "name": "Swagger UI (browser only)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{transactionServiceUrl}}/swagger-ui.html",
+                  "host": [
+                    "{{transactionServiceUrl}}"
+                  ],
+                  "path": [
+                    "swagger-ui.html"
+                  ]
+                },
+                "description": "Milestone 7: open this URL in a browser, not Postman, for the interactive Swagger UI. Included here for discoverability."
+              }
+            }
+          ]
+        },
+        {
           "name": "Actuator",
           "item": [
             {
@@ -1399,6 +1655,46 @@
           "description": ""
         },
         {
+          "name": "Docs",
+          "item": [
+            {
+              "name": "OpenAPI Document (/v3/api-docs)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{budgetServiceUrl}}/v3/api-docs",
+                  "host": [
+                    "{{budgetServiceUrl}}"
+                  ],
+                  "path": [
+                    "v3",
+                    "api-docs"
+                  ]
+                },
+                "description": "Milestone 7: springdoc-openapi's generated OpenAPI document, always in sync with this service's live controller annotations."
+              }
+            },
+            {
+              "name": "Swagger UI (browser only)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{budgetServiceUrl}}/swagger-ui.html",
+                  "host": [
+                    "{{budgetServiceUrl}}"
+                  ],
+                  "path": [
+                    "swagger-ui.html"
+                  ]
+                },
+                "description": "Milestone 7: open this URL in a browser, not Postman, for the interactive Swagger UI. Included here for discoverability."
+              }
+            }
+          ]
+        },
+        {
           "name": "Actuator",
           "item": [
             {
@@ -1532,6 +1828,46 @@
       "name": "Notification Service",
       "item": [
         {
+          "name": "Docs",
+          "item": [
+            {
+              "name": "OpenAPI Document (/v3/api-docs)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{notificationServiceUrl}}/v3/api-docs",
+                  "host": [
+                    "{{notificationServiceUrl}}"
+                  ],
+                  "path": [
+                    "v3",
+                    "api-docs"
+                  ]
+                },
+                "description": "Milestone 7: springdoc-openapi's generated OpenAPI document, always in sync with this service's live controller annotations."
+              }
+            },
+            {
+              "name": "Swagger UI (browser only)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{notificationServiceUrl}}/swagger-ui.html",
+                  "host": [
+                    "{{notificationServiceUrl}}"
+                  ],
+                  "path": [
+                    "swagger-ui.html"
+                  ]
+                },
+                "description": "Milestone 7: open this URL in a browser, not Postman, for the interactive Swagger UI. Included here for discoverability."
+              }
+            }
+          ]
+        },
+        {
           "name": "Actuator",
           "item": [
             {
@@ -1664,6 +2000,46 @@
     {
       "name": "Analytics Service",
       "item": [
+        {
+          "name": "Docs",
+          "item": [
+            {
+              "name": "OpenAPI Document (/v3/api-docs)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{analyticsServiceUrl}}/v3/api-docs",
+                  "host": [
+                    "{{analyticsServiceUrl}}"
+                  ],
+                  "path": [
+                    "v3",
+                    "api-docs"
+                  ]
+                },
+                "description": "Milestone 7: springdoc-openapi's generated OpenAPI document, always in sync with this service's live controller annotations."
+              }
+            },
+            {
+              "name": "Swagger UI (browser only)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{analyticsServiceUrl}}/swagger-ui.html",
+                  "host": [
+                    "{{analyticsServiceUrl}}"
+                  ],
+                  "path": [
+                    "swagger-ui.html"
+                  ]
+                },
+                "description": "Milestone 7: open this URL in a browser, not Postman, for the interactive Swagger UI. Included here for discoverability."
+              }
+            }
+          ]
+        },
         {
           "name": "Actuator",
           "item": [

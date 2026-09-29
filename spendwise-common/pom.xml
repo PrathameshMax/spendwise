@@ -13,13 +13,29 @@
     <artifactId>spendwise-common</artifactId>
     <packaging>jar</packaging>
     <name>SpendWise :: Common</name>
-    <description>Cross-cutting DTOs, exception types, correlation-ID filter, and the signed
-        user-context filter (Milestone 6) shared by every service</description>
+    <description>Cross-cutting DTOs, exception types, correlation-ID filter, the signed
+        user-context filter (Milestone 6), and the shared RFC 7807 ProblemDetail exception
+        handler (Milestone 7) shared by every service</description>
 
     <dependencies>
         <dependency>
             <groupId>jakarta.servlet</groupId>
             <artifactId>jakarta.servlet-api</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <!-- "provided" deliberately, same as jakarta.servlet-api above: AbstractGlobalExceptionHandler
+             (Milestone 7) extends the servlet-only ResponseEntityExceptionHandler, but this must
+             never become a transitive dependency of api-gateway, whose WebFlux/Netty runtime has
+             no servlet container and no jakarta.servlet-api on its classpath at all. Spring Boot's
+             WebApplicationType.deduceFromClasspath() falls back to SERVLET/NONE detection the moment
+             a DispatcherServlet class is resolvable but no servlet API is present, which would break
+             api-gateway's reactive startup outright. "provided" scope is not transitive, so consumers
+             never pull this in unless they declare it themselves (every servlet-based service already
+             does, via spring-boot-starter-web) — api-gateway never scans this package, so the class is
+             never loaded there. -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-webmvc</artifactId>
             <scope>provided</scope>
         </dependency>
         <dependency>

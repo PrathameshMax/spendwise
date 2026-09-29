@@ -23,10 +23,25 @@ import org.springframework.context.annotation.Configuration;
  * identity forwarding for every route uniformly, so no route-specific filter
  * is needed there. notification-service and analytics-service have no REST
  * surface yet (Milestones 19 and 15 respectively), so they are not routed
- * here until those milestones give them one.
+ * here for business traffic until those milestones give them one.
+ *
+ * Milestone 7 adds one route per service purely to proxy its OpenAPI
+ * document ({@code /v3/api-docs/<service-name>} -> that service's own
+ * {@code /v3/api-docs}) onto the Gateway's own origin. This exists because
+ * Swagger UI fetches each spec via browser JS: fetching directly from
+ * auth-service's port (8081) while the aggregator page is served from the
+ * Gateway's port (8080) is a cross-origin request, and proxying through the
+ * same origin avoids needing to configure CORS on every business service
+ * just to let their docs render. This loop covers every entry in
+ * {@code spendwise.gateway.routes} — including notification-service and
+ * analytics-service, which are absent from the business routes above but
+ * still get their (currently near-empty) OpenAPI document proxied, matching
+ * the "wire springdoc into every service" scope of this milestone.
  */
 @Configuration
 public class RouteConfig {
+
+    private static final String API_DOCS_PATH = "/v3/api-docs";
 
     @Bean
     public RouteLocator routeLocator(RouteLocatorBuilder builder,
@@ -34,7 +49,7 @@ public class RouteConfig {
                                       GatewaySecurityProperties securityProperties) {
         String authServiceUri = routeProperties.uriFor("auth-service");
 
-        return builder.routes()
+        RouteLocatorBuilder.Builder routes = builder.routes()
                 .route("auth-service-issuance", r -> r
                         .path("/api/v1/auth/register", "/api/v1/auth/login")
                         .filters(f -> f.modifyResponseBody(String.class, String.class,
@@ -59,7 +74,17 @@ public class RouteConfig {
                         .uri(routeProperties.uriFor("transaction-service")))
                 .route("budget-service", r -> r
                         .path("/api/v1/budgets/**")
-                        .uri(routeProperties.uriFor("budget-service")))
-                .build();
+                        .uri(routeProperties.uriFor("budget-service")));
+
+        for (String serviceName : routeProperties.getRoutes().keySet()) {
+            String docsPath = API_DOCS_PATH + "/" + serviceName;
+            String targetUri = routeProperties.uriFor(serviceName);
+            routes = routes.route(serviceName + "-docs", r -> r
+                    .path(docsPath)
+                    .filters(f -> f.rewritePath(docsPath, API_DOCS_PATH))
+                    .uri(targetUri));
+        }
+
+        return routes.build();
     }
 }

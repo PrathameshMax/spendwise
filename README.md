@@ -199,4 +199,64 @@ isn't a monitoring blind spot. Each service still exposes its own port directly 
 now (no network policy prevents bypassing the Gateway) — that hardening isn't in
 this milestone's stated scope.
 
-Next: Milestone 7 — API Contract & Documentation Governance.
+**Milestone 7 (Phase 2) complete** — API Contract & Documentation Governance.
+springdoc-openapi is wired into every service, so `/v3/api-docs` and
+`/swagger-ui.html` are generated from the live controller annotations and can never
+drift out of sync with the code the way a hand-maintained spec would (Q35). This
+includes `notification-service` and `analytics-service`, even though neither has a
+business endpoint yet — their `OpenApiConfig` beans exist now precisely so nothing
+has to be retrofitted when their REST surfaces land in Milestones 19 and 15. The
+API Gateway aggregates all six into one Swagger UI at its own origin
+(`/swagger-ui.html`) via new per-service `/v3/api-docs/<service>` proxy routes in
+`RouteConfig` — same-origin proxying, not direct cross-port fetches, so Swagger
+UI's browser-side JS never hits a CORS wall; documentation endpoints stay
+`permitAll()` in `SecurityConfig` while every business endpoint still requires a
+JWT.
+
+Every ad-hoc "surfaces as a generic 500" exception path called out in every prior
+milestone's status notes (Milestones 1, 4, 6) is now closed: `SpendWiseException`
+carries an `HttpStatus` per exception type (`ResourceNotFoundException` → 404,
+`DuplicateResourceException` → 409, `BusinessValidationException` → 422,
+`InvalidCredentialsException`/`InvalidRefreshTokenException` → 401), and a single
+`AbstractGlobalExceptionHandler` (spendwise-common) turns any of them — plus an
+unhandled catch-all — into an RFC 7807 `ProblemDetail` carrying a machine-readable
+`errorCode` and the request's `correlationId` (Q34). Each service activates it via
+its own two-line `@RestControllerAdvice` subclass, since Spring Boot's component
+scan is per-service and won't discover a class living in `spendwise-common`'s
+package on its own. `api-gateway` gets the same RFC 7807 shape a different way —
+`spring.webflux.problemdetails.enabled=true` — since it has no business
+`@RestController` of its own to hand a servlet-only `@RestControllerAdvice` to.
+
+URI-based versioning (`/api/v1/...`) has been the convention since Milestone 1;
+this milestone formalizes it as a documented policy rather than an implicit habit
+— see **API Versioning & Deprecation Policy** below (Q33). No `/api/v2/...` exists
+yet because no breaking change has forced one, consistent with not building
+speculative infrastructure ahead of an actual need.
+
+Next: Milestone 8 — Type-Safe Mapping & Validation.
+
+## API Versioning & Deprecation Policy
+
+- **Convention**: every endpoint is versioned in the URI (`/api/v1/...`), not via a
+  header or content-negotiation scheme. It's the simplest to reason about across
+  independently-deployed services, and the version is visible directly in logs,
+  traces, and Gateway route definitions without inspecting request headers.
+- **What forces a `v2`**: a breaking change only — removing or renaming a field or
+  endpoint, changing a field's type or semantics, tightening validation in a way
+  that rejects previously-valid requests, or changing what a status code means.
+  An additive, backward-compatible change (a new optional field, a new endpoint, a
+  new optional query parameter) ships straight into the current `v1` and never
+  requires a new version.
+- **Coexistence**: when a `v2` is cut, `v1` and `v2` run side by side behind the
+  same Gateway and the same service — never a hard cutover that breaks whoever
+  hasn't migrated yet.
+- **Deprecation signaling**: once a `v2` exists, the superseded `v1` operation is
+  marked `deprecated: true` in its OpenAPI annotation (renders struck-through in
+  Swagger UI automatically) and its responses carry a `Deprecation: true` header
+  plus a `Sunset: <date>` header (RFC 8594).
+- **Sunset window**: a minimum of 90 days between a `v2` shipping and its
+  corresponding `v1` operation being removed, matching common industry practice.
+
+No endpoint in this codebase is deprecated yet — this section exists so the policy
+is settled and consistent the day a breaking change first forces a `v2`, rather
+than improvised under time pressure at that point.
