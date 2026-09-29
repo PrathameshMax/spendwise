@@ -1,1 +1,2 @@
 com.spendwise.common.health.SpendwiseHealthAutoConfiguration
+com.spendwise.common.observability.SpendwiseObservationAutoConfiguration

@@ -4,6 +4,9 @@ logging:
     correlation: "[${spring.application.name:},%X{correlationId:-},%X{traceId:-},%X{spanId:-}] "
 
 management:
+  observations:
+    enable:
+      spring.security: false
   tracing:
     sampling:
       probability: 1.0

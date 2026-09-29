@@ -27,5 +27,6 @@ management:
           include: livenessState,deadlock
 
 logging:
+  include-application-name: false
   pattern:
-    level: "%5p [${spring.application.name},%X{correlationId}]"
+    correlation: "[${spring.application.name:},%X{correlationId:-},%X{traceId:-},%X{spanId:-}] "
