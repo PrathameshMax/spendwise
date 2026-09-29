@@ -1,6 +1,7 @@
 package com.spendwise.authservice.api;
 
 import com.spendwise.authservice.service.AuthService;
+import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -31,18 +32,18 @@ public class AuthController {
     }
 
     @PostMapping("/register")
-    public ResponseEntity<TokenPairResponse> register(@RequestBody RegisterRequest request) {
+    public ResponseEntity<TokenPairResponse> register(@Valid @RequestBody RegisterRequest request) {
         TokenPairResponse response = authService.register(request);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
     @PostMapping("/login")
-    public ResponseEntity<TokenPairResponse> login(@RequestBody LoginRequest request) {
+    public ResponseEntity<TokenPairResponse> login(@Valid @RequestBody LoginRequest request) {
         return ResponseEntity.ok(authService.login(request));
     }
 
     @PostMapping("/refresh")
-    public ResponseEntity<TokenPairResponse> refresh(@RequestBody RefreshRequest request) {
+    public ResponseEntity<TokenPairResponse> refresh(@Valid @RequestBody RefreshRequest request) {
         return ResponseEntity.ok(authService.refresh(request));
     }
 

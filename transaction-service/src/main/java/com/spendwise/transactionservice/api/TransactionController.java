@@ -2,6 +2,7 @@ package com.spendwise.transactionservice.api;
 
 import com.spendwise.transactionservice.domain.TransactionType;
 import com.spendwise.transactionservice.service.TransactionService;
+import jakarta.validation.Valid;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -29,7 +30,7 @@ public class TransactionController {
     }
 
     @PostMapping
-    public ResponseEntity<TransactionResponse> create(@RequestBody CreateTransactionRequest request) {
+    public ResponseEntity<TransactionResponse> create(@Valid @RequestBody CreateTransactionRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(transactionService.create(request));
     }
 

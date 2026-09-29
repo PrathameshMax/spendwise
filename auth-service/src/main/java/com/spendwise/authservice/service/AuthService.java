@@ -8,6 +8,7 @@ import com.spendwise.authservice.api.TokenPairResponse;
 import com.spendwise.authservice.domain.Credential;
 import com.spendwise.authservice.domain.CredentialRepository;
 import com.spendwise.authservice.exception.InvalidCredentialsException;
+import com.spendwise.authservice.mapper.CredentialMapper;
 import com.spendwise.authservice.security.TokenService;
 import com.spendwise.common.exception.DuplicateResourceException;
 import com.spendwise.common.exception.ResourceNotFoundException;
@@ -23,13 +24,16 @@ public class AuthService {
     private final CredentialRepository credentialRepository;
     private final PasswordEncoder passwordEncoder;
     private final TokenService tokenService;
+    private final CredentialMapper credentialMapper;
 
     public AuthService(CredentialRepository credentialRepository,
                         PasswordEncoder passwordEncoder,
-                        TokenService tokenService) {
+                        TokenService tokenService,
+                        CredentialMapper credentialMapper) {
         this.credentialRepository = credentialRepository;
         this.passwordEncoder = passwordEncoder;
         this.tokenService = tokenService;
+        this.credentialMapper = credentialMapper;
     }
 
     @Transactional
@@ -61,11 +65,7 @@ public class AuthService {
     public CredentialResponse getById(UUID id) {
         Credential credential = credentialRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Credential", id));
-        return toResponse(credential);
-    }
-
-    private CredentialResponse toResponse(Credential credential) {
-        return new CredentialResponse(credential.getId(), credential.getEmail(), credential.getCreatedAt());
+        return credentialMapper.toResponse(credential);
     }
 
     private TokenPairResponse toTokenPairResponse(TokenService.TokenPair pair) {

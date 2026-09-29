@@ -4,6 +4,7 @@ import com.spendwise.budgetservice.api.BudgetResponse;
 import com.spendwise.budgetservice.api.CreateBudgetRequest;
 import com.spendwise.budgetservice.domain.Budget;
 import com.spendwise.budgetservice.domain.BudgetRepository;
+import com.spendwise.budgetservice.mapper.BudgetMapper;
 import com.spendwise.common.exception.DuplicateResourceException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -16,9 +17,11 @@ import java.util.UUID;
 public class BudgetService {
 
     private final BudgetRepository budgetRepository;
+    private final BudgetMapper budgetMapper;
 
-    public BudgetService(BudgetRepository budgetRepository) {
+    public BudgetService(BudgetRepository budgetRepository, BudgetMapper budgetMapper) {
         this.budgetRepository = budgetRepository;
+        this.budgetMapper = budgetMapper;
     }
 
     @Transactional
@@ -32,24 +35,13 @@ public class BudgetService {
 
         Budget saved = budgetRepository.save(new Budget(
                 request.userId(), request.category(), request.cappedAmount(), request.periodMonth()));
-        return toResponse(saved);
+        return budgetMapper.toResponse(saved);
     }
 
     @Transactional(readOnly = true)
     public List<BudgetResponse> summary(UUID userId, YearMonth periodMonth) {
         return budgetRepository.findByUserIdAndPeriodMonth(userId, periodMonth).stream()
-                .map(this::toResponse)
+                .map(budgetMapper::toResponse)
                 .toList();
-    }
-
-    private BudgetResponse toResponse(Budget budget) {
-        return new BudgetResponse(
-                budget.getId(),
-                budget.getUserId(),
-                budget.getCategory(),
-                budget.getCappedAmount(),
-                budget.getCurrentSpend(),
-                budget.getPeriodMonth(),
-                budget.getCreatedAt());
     }
 }

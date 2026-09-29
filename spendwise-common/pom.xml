@@ -14,8 +14,9 @@
     <packaging>jar</packaging>
     <name>SpendWise :: Common</name>
     <description>Cross-cutting DTOs, exception types, correlation-ID filter, the signed
-        user-context filter (Milestone 6), and the shared RFC 7807 ProblemDetail exception
-        handler (Milestone 7) shared by every service</description>
+        user-context filter (Milestone 6), the shared RFC 7807 ProblemDetail exception
+        handler (Milestone 7), and the shared Bean Validation groups and custom currency
+        constraint (Milestone 8) shared by every service</description>
 
     <dependencies>
         <dependency>
@@ -37,6 +38,18 @@
             <groupId>org.springframework</groupId>
             <artifactId>spring-webmvc</artifactId>
             <scope>provided</scope>
+        </dependency>
+        <!-- Milestone 8 — the custom @ValidCurrencyCode constraint and the OnCreate/OnUpdate
+             validation-group marker interfaces live in this module (validation package) so
+             every service shares one definition instead of each redeclaring its own currency
+             constraint. Only the API is needed here (annotations + SPI interfaces); the actual
+             constraint-validation engine (Hibernate Validator) is pulled in transitively by
+             each consuming service's own spring-boot-starter-validation dependency, exactly
+             the same "API here, implementation at the edge" split already used for the servlet
+             API above. -->
+        <dependency>
+            <groupId>jakarta.validation</groupId>
+            <artifactId>jakarta.validation-api</artifactId>
         </dependency>
         <dependency>
             <groupId>org.slf4j</groupId>
