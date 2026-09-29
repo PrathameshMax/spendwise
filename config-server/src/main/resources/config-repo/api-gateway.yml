@@ -5,8 +5,45 @@ spendwise:
       user-service: http://localhost:8082
       transaction-service: http://localhost:8083
       budget-service: http://localhost:8084
+      # notification-service and analytics-service have no business routes above yet
+      # (Milestones 19 and 15 respectively) — these two entries exist solely so
+      # RouteConfig's Milestone 7 docs-proxy loop can expose their (currently
+      # near-empty) OpenAPI document too, matching "wire springdoc into every
+      # service." Do not add business path routes for them until those milestones.
+      notification-service: http://localhost:8085
+      analytics-service: http://localhost:8086
   security:
     jwk-set-uri: http://localhost:8081/oauth2/jwks
     refresh-cookie-name: spendwise_refresh_token
     refresh-cookie-path: /api/v1/auth/refresh
     refresh-cookie-max-age-seconds: 604800
+
+springdoc:
+  swagger-ui:
+    # Milestone 7 — one Swagger UI at the Gateway aggregating every service's
+    # own OpenAPI document, fetched same-origin through RouteConfig's docs-proxy
+    # routes (avoids the cross-origin fetch Swagger UI's browser JS would
+    # otherwise need to make against each service's own port).
+    urls:
+      - name: auth-service
+        url: /v3/api-docs/auth-service
+      - name: user-service
+        url: /v3/api-docs/user-service
+      - name: transaction-service
+        url: /v3/api-docs/transaction-service
+      - name: budget-service
+        url: /v3/api-docs/budget-service
+      - name: notification-service
+        url: /v3/api-docs/notification-service
+      - name: analytics-service
+        url: /v3/api-docs/analytics-service
+
+spring:
+  webflux:
+    # api-gateway has no custom @RestController of its own throwing SpendWiseException
+    # types, so it doesn't need a servlet-only @RestControllerAdvice like the
+    # business services got in Milestone 7 — this built-in Spring Boot flag gives
+    # WebFlux's own default error responses the same RFC 7807 ProblemDetail shape
+    # instead, keeping the error format consistent platform-wide with no custom code.
+    problemdetails:
+      enabled: true
