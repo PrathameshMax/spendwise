@@ -1,10 +1,13 @@
 package com.spendwise.userservice.api;
 
+import com.spendwise.common.validation.OnCreate;
+import com.spendwise.common.validation.OnUpdate;
 import com.spendwise.userservice.service.UserService;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -15,6 +18,13 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.UUID;
 
+/**
+ * {@code @Validated(OnCreate.class)}/{@code @Validated(OnUpdate.class)}
+ * (Milestone 8) select which Bean Validation group applies per endpoint —
+ * plain {@code @Valid} cannot specify a group, which is exactly why Spring's
+ * own {@code @Validated} is used here instead of jakarta's {@code @Valid}
+ * (used everywhere else in the platform where there is only one group).
+ */
 @RestController
 @RequestMapping("/api/v1/users")
 public class UserController {
@@ -26,7 +36,7 @@ public class UserController {
     }
 
     @PostMapping
-    public ResponseEntity<UserResponse> create(@RequestBody CreateUserRequest request) {
+    public ResponseEntity<UserResponse> create(@Validated(OnCreate.class) @RequestBody UserRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(userService.create(request));
     }
 
@@ -44,7 +54,8 @@ public class UserController {
     }
 
     @PatchMapping("/{id}")
-    public ResponseEntity<UserResponse> update(@PathVariable UUID id, @RequestBody UpdateUserRequest request) {
+    public ResponseEntity<UserResponse> update(
+            @PathVariable UUID id, @Validated(OnUpdate.class) @RequestBody UserRequest request) {
         return ResponseEntity.ok(userService.update(id, request));
     }
 }

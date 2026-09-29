@@ -38,6 +38,9 @@
         <spendwise-common.version>1.0.0-SNAPSHOT</spendwise-common.version>
         <!-- Not part of spring-boot-dependencies' BOM, so pinned explicitly here (Milestone 7) -->
         <springdoc-openapi.version>2.7.0</springdoc-openapi.version>
+        <!-- Not part of spring-boot-dependencies' BOM either, so pinned explicitly here
+             (Milestone 8) — used for compile-time-checked entity-to-response-DTO mapping. -->
+        <mapstruct.version>1.6.3</mapstruct.version>
     </properties>
 
     <dependencyManagement>
@@ -70,6 +73,16 @@
                 <groupId>org.springdoc</groupId>
                 <artifactId>springdoc-openapi-starter-webflux-ui</artifactId>
                 <version>${springdoc-openapi.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.mapstruct</groupId>
+                <artifactId>mapstruct</artifactId>
+                <version>${mapstruct.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.mapstruct</groupId>
+                <artifactId>mapstruct-processor</artifactId>
+                <version>${mapstruct.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

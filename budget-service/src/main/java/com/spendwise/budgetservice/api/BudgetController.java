@@ -1,6 +1,7 @@
 package com.spendwise.budgetservice.api;
 
 import com.spendwise.budgetservice.service.BudgetService;
+import jakarta.validation.Valid;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -27,7 +28,7 @@ public class BudgetController {
     }
 
     @PostMapping
-    public ResponseEntity<BudgetResponse> create(@RequestBody CreateBudgetRequest request) {
+    public ResponseEntity<BudgetResponse> create(@Valid @RequestBody CreateBudgetRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(budgetService.create(request));
     }
 

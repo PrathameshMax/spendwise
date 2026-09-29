@@ -9,6 +9,7 @@ import com.spendwise.transactionservice.domain.CategoryRepository;
 import com.spendwise.transactionservice.domain.Transaction;
 import com.spendwise.transactionservice.domain.TransactionRepository;
 import com.spendwise.transactionservice.domain.TransactionSpecifications;
+import com.spendwise.transactionservice.mapper.TransactionMapper;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -20,10 +21,14 @@ public class TransactionService {
 
     private final TransactionRepository transactionRepository;
     private final CategoryRepository categoryRepository;
+    private final TransactionMapper transactionMapper;
 
-    public TransactionService(TransactionRepository transactionRepository, CategoryRepository categoryRepository) {
+    public TransactionService(TransactionRepository transactionRepository,
+                               CategoryRepository categoryRepository,
+                               TransactionMapper transactionMapper) {
         this.transactionRepository = transactionRepository;
         this.categoryRepository = categoryRepository;
+        this.transactionMapper = transactionMapper;
     }
 
     @Transactional
@@ -39,7 +44,7 @@ public class TransactionService {
                 request.description(),
                 request.transactionDate()));
 
-        return toResponse(saved);
+        return transactionMapper.toResponse(saved);
     }
 
     @Transactional(readOnly = true)
@@ -53,19 +58,6 @@ public class TransactionService {
                 TransactionSpecifications.amountFrom(filter.minAmount()),
                 TransactionSpecifications.amountTo(filter.maxAmount()));
 
-        return transactionRepository.findAll(spec, pageable).map(this::toResponse);
-    }
-
-    private TransactionResponse toResponse(Transaction transaction) {
-        return new TransactionResponse(
-                transaction.getId(),
-                transaction.getUserId(),
-                transaction.getCategory().getId(),
-                transaction.getCategory().getName(),
-                transaction.getAmount(),
-                transaction.getType(),
-                transaction.getDescription(),
-                transaction.getTransactionDate(),
-                transaction.getCreatedAt());
+        return transactionRepository.findAll(spec, pageable).map(transactionMapper::toResponse);
     }
 }

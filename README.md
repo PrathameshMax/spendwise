@@ -233,7 +233,66 @@ this milestone formalizes it as a documented policy rather than an implicit habi
 yet because no breaking change has forced one, consistent with not building
 speculative infrastructure ahead of an actual need.
 
-Next: Milestone 8 — Type-Safe Mapping & Validation.
+**Milestone 8 (Phase 2) complete** — Type-Safe Mapping & Validation.
+
+Every hand-written `private XResponse toResponse(XEntity entity)` method across the
+four business services (`AuthService`, `UserService`, `CategoryService`,
+`TransactionService`, `BudgetService`) is gone, replaced by a MapStruct
+`@Mapper(componentModel = "spring")` interface per entity (`CredentialMapper`,
+`UserProfileMapper`, `CategoryMapper`, `TransactionMapper`, `BudgetMapper`).
+MapStruct generates the mapping implementation at compile time — a field renamed
+on either side of a mapping fails the build immediately instead of silently
+returning `null` at runtime the way a hand-written mapper degrades. Scope is
+deliberately entity-to-response-DTO only: the request side (`UserRequest` ->
+`UserProfile`, etc.) stays an explicit domain-constructor call, since that is
+where domain invariants belong, and a generic mapper would bypass them.
+`TransactionMapper` is the one mapper with `@Mapping` directives, flattening the
+nested `Transaction.category.id`/`category.name` association onto
+`TransactionResponse`'s flat `categoryId`/`categoryName` fields — the textbook
+case the dotted `source` path exists for.
+
+Every request DTO across all four services now carries Jakarta Bean Validation
+annotations (`@NotBlank`, `@Email`, `@Size`, `@NotNull`, `@Positive`,
+`@PastOrPresent`) enforced via `@Valid` on each controller's `@RequestBody`
+parameter, closing the last gap in Milestone 7's error-response contract: a
+malformed request body used to reach the service layer and fail unpredictably
+(a `NullPointerException`, a database constraint violation) instead of being
+rejected at the edge with a clear, structured error.
+
+`user-service`'s `CreateUserRequest`/`UpdateUserRequest` are merged into one
+`UserRequest`, using Bean Validation **groups** (`OnCreate`/`OnUpdate`,
+spendwise-common) to keep create-vs-update semantics precise — exactly the
+redesign `UpdateUserRequest`'s own Javadoc had flagged as pending since
+Milestone 2. `email`/`fullName`/`preferredCurrency` are `@NotBlank` only in the
+`OnCreate` group, so a partial update can still omit them; `@Size`/
+`@ValidCurrencyCode` carry no group at all, so they run under the implicit
+`Default` group on *both* create and update, since `OnCreate`/`OnUpdate` both
+`extends Default` (a well-known Bean Validation gotcha — a custom group does
+not imply `Default` unless it says so explicitly). The controller selects the
+active group with Spring's `@Validated(OnCreate.class)` /
+`@Validated(OnUpdate.class)`, since plain `@Valid` cannot specify one. This
+also fixes a latent bug: `UserProfile.updateProfile` only skips a `null` field,
+so `fullName: ""` used to silently overwrite a valid name with an empty string;
+the un-grouped `@Size(min = 1, ...)` now rejects that on both create and
+update.
+
+One custom constraint, `@ValidCurrencyCode` (spendwise-common, backed by
+`CurrencyCodeValidator`), validates against the JVM's own `java.util.Currency`
+ISO 4217 registry rather than a hand-maintained code list, applied to
+`UserRequest.preferredCurrency` — the only currency-shaped field anywhere in
+the platform. The validator is null-tolerant by convention (returns valid for
+`null`), leaving presence to the group-scoped `@NotBlank` so the two compose
+correctly instead of duplicating each other's job.
+
+`AbstractGlobalExceptionHandler` (spendwise-common) now overrides
+`handleMethodArgumentNotValid`, enriching the `ProblemDetail`
+`ResponseEntityExceptionHandler` already builds for a failed `@Valid`/
+`@Validated` request with the same `errorCode`/`correlationId` properties every
+other error path already carries (`VALIDATION_FAILED`) — without this, a
+validation failure would have been the one error response on the whole
+platform that didn't match the Milestone 7 contract.
+
+Next: Milestone 9 — Enterprise-Grade Containerization & Memory Quotas.
 
 ## API Versioning & Deprecation Policy
 
