@@ -1,0 +1,12 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Spendwise -User" type="Application" factoryName="Application">
+    <option name="ALTERNATIVE_JRE_PATH" value="temurin-21" />
+    <option name="ALTERNATIVE_JRE_PATH_ENABLED" value="true" />
+    <option name="MAIN_CLASS_NAME" value="com.spendwise.userservice.UserServiceApplication" />
+    <module name="user-service" />
+    <option name="VM_PARAMETERS" value="  -Xms64m -Xmx256m -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -XX:ReservedCodeCacheSize=64m -Xss512k -Duser.timezone=Asia/Kolkata" />
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>
