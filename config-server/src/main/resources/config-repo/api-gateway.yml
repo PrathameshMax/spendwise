@@ -55,3 +55,7 @@ spring:
     # instead, keeping the error format consistent platform-wide with no custom code.
     problemdetails:
       enabled: true
+  cloud:
+    gateway:
+      default-filters:
+        - DedupeResponseHeader=X-Correlation-ID, RETAIN_FIRST
