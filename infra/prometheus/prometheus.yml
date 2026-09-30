@@ -6,34 +6,39 @@ rule_files:
   - /etc/prometheus/alerts.yml
 
 scrape_configs:
+  # Milestone 9 — every service now runs as its own container on this same
+  # docker-compose network, so Prometheus reaches them by compose service name
+  # (Docker's embedded DNS resolves it to the container's IP) instead of the
+  # host.docker.internal indirection Milestones 3-5 needed for services still
+  # running on the host via `mvn spring-boot:run`.
   - job_name: spendwise-services
     metrics_path: /actuator/prometheus
     static_configs:
-      - targets: ["host.docker.internal:8080"]
+      - targets: ["api-gateway:8080"]
         labels:
           service: api-gateway
-      - targets: ["host.docker.internal:8081"]
+      - targets: ["auth-service:8081"]
         labels:
           service: auth-service
-      - targets: ["host.docker.internal:8082"]
+      - targets: ["user-service:8082"]
         labels:
           service: user-service
-      - targets: ["host.docker.internal:8083"]
+      - targets: ["transaction-service:8083"]
         labels:
           service: transaction-service
-      - targets: ["host.docker.internal:8084"]
+      - targets: ["budget-service:8084"]
         labels:
           service: budget-service
-      - targets: ["host.docker.internal:8085"]
+      - targets: ["notification-service:8085"]
         labels:
           service: notification-service
-      - targets: ["host.docker.internal:8086"]
+      - targets: ["analytics-service:8086"]
         labels:
           service: analytics-service
 
   - job_name: spendwise-config-server
     metrics_path: /actuator/prometheus
     static_configs:
-      - targets: ["host.docker.internal:8888"]
+      - targets: ["config-server:8888"]
         labels:
           service: config-server

@@ -1,19 +1,27 @@
 spendwise:
   gateway:
+    # Milestone 9 — each host is parameterized the same way `DB_HOST` has been
+    # since Milestone 4 (`${VAR:localhost}`): the `localhost:<port>` default
+    # keeps every route working unchanged when api-gateway runs on the host via
+    # `mvn spring-boot:run` against services also running on the host, while
+    # docker-compose.yml overrides each *_SERVICE_HOST env var to the target
+    # service's own compose service name once api-gateway and every business
+    # service become separate containers — "localhost" inside a container
+    # means that container itself, never a sibling one.
     routes:
-      auth-service: http://localhost:8081
-      user-service: http://localhost:8082
-      transaction-service: http://localhost:8083
-      budget-service: http://localhost:8084
+      auth-service: http://${AUTH_SERVICE_HOST:localhost}:8081
+      user-service: http://${USER_SERVICE_HOST:localhost}:8082
+      transaction-service: http://${TRANSACTION_SERVICE_HOST:localhost}:8083
+      budget-service: http://${BUDGET_SERVICE_HOST:localhost}:8084
       # notification-service and analytics-service have no business routes above yet
       # (Milestones 19 and 15 respectively) — these two entries exist solely so
       # RouteConfig's Milestone 7 docs-proxy loop can expose their (currently
       # near-empty) OpenAPI document too, matching "wire springdoc into every
       # service." Do not add business path routes for them until those milestones.
-      notification-service: http://localhost:8085
-      analytics-service: http://localhost:8086
+      notification-service: http://${NOTIFICATION_SERVICE_HOST:localhost}:8085
+      analytics-service: http://${ANALYTICS_SERVICE_HOST:localhost}:8086
   security:
-    jwk-set-uri: http://localhost:8081/oauth2/jwks
+    jwk-set-uri: http://${AUTH_SERVICE_HOST:localhost}:8081/oauth2/jwks
     refresh-cookie-name: spendwise_refresh_token
     refresh-cookie-path: /api/v1/auth/refresh
     refresh-cookie-max-age-seconds: 604800
