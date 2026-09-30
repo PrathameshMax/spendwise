@@ -39,6 +39,12 @@
         <!-- Not part of spring-boot-dependencies' BOM either, so pinned explicitly here
              (Milestone 8) — used for compile-time-checked entity-to-response-DTO mapping. -->
         <mapstruct.version>1.6.3</mapstruct.version>
+        <!-- Not part of spring-boot-dependencies' or spring-cloud-dependencies' BOM, so
+             pinned explicitly here (Milestone 10/11) — the Retry (Milestone 10 timeouts'
+             companion) and, from Milestone 12 onward, CircuitBreaker/Bulkhead/TimeLimiter
+             primitives layered directly over the Feign clients declared in
+             transaction-service and budget-service. -->
+        <resilience4j.version>2.2.0</resilience4j.version>
     </properties>
 
     <dependencyManagement>
@@ -81,6 +87,11 @@
                 <groupId>org.mapstruct</groupId>
                 <artifactId>mapstruct-processor</artifactId>
                 <version>${mapstruct.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.github.resilience4j</groupId>
+                <artifactId>resilience4j-spring-boot3</artifactId>
+                <version>${resilience4j.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

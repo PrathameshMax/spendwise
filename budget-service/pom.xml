@@ -65,6 +65,14 @@
             <groupId>org.springframework.cloud</groupId>
             <artifactId>spring-cloud-starter-loadbalancer</artifactId>
         </dependency>
+        <!-- Milestone 11 — the @Retry annotation on UserServiceClient.getById below.
+             Auto-configures its AOP aspect against spring-boot-starter-aop (already
+             present, added by the Milestone 9 fix commit alongside spring-retry for
+             config-import retry), no @Enable... annotation needed on the main class. -->
+        <dependency>
+            <groupId>io.github.resilience4j</groupId>
+            <artifactId>resilience4j-spring-boot3</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>

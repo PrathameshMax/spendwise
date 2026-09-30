@@ -31,6 +31,51 @@ spring:
     open-in-view: false
     hibernate:
       ddl-auto: validate
+  cloud:
+    openfeign:
+      client:
+        config:
+          # Milestone 11 — "default" applies platform-wide to every Feign client,
+          # present or future, not just today's one named "user-service" client
+          # (Q41/Q42's Milestone 10 UserServiceClient) — centralized here for the
+          # same reason Eureka's defaultZone is: it's inert on the five services
+          # with no Feign client on their classpath and picked up by whichever
+          # ones do. connect-timeout is generous (TCP handshake to a sibling
+          # container on the same compose network should be near-instant);
+          # read-timeout is deliberately tight — the Chaos Lab in the README
+          # walks through why 1.5s specifically, and what happens without it
+          # (Q43/Q44).
+          default:
+            connect-timeout: 2000
+            read-timeout: 1500
+
+# Milestone 11 — layered over the read-timeout above: a request that fails fast
+# at 1.5s because the network hiccuped (not because user-service is actually
+# down or overloaded) is worth one quick retry rather than surfacing an error
+# for a blip. Deliberately scoped to this platform's one idempotent GET lookup
+# (Q45 — retrying a non-idempotent write could double-apply it, and retrying
+# indiscriminately on every FeignException would retry a legitimate 404 three
+# times for no reason); retry-exceptions is narrowed to feign.RetryableException
+# specifically, the type Feign wraps connect/read-timeout and other I/O
+# failures in, so ResourceNotFoundException's cause (FeignException.NotFound)
+# is never retried. Exponential backoff plus randomized jitter (rather than a
+# fixed delay) avoids every concurrently-retrying caller hammering user-service
+# again at the exact same instant (a self-inflicted thundering herd). Note this
+# is intentionally incomplete on its own — a genuinely overloaded (not just
+# blip-y) user-service would have every caller retrying into it, which is
+# exactly the failure mode Milestone 12's Circuit Breaker exists to cut off.
+resilience4j:
+  retry:
+    instances:
+      userServiceLookup:
+        max-attempts: 3
+        wait-duration: 200ms
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2
+        enable-randomized-wait: true
+        randomized-wait-factor: 0.5
+        retry-exceptions:
+          - feign.RetryableException
 
 spendwise:
   security:

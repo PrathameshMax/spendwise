@@ -433,7 +433,66 @@ the Feign equivalent of what `CorrelationIdFilter` already does for inbound
 servlet requests and `CorrelationIdGlobalFilter` does at the reactive API
 Gateway.
 
-Next: Milestone 11 — Defensive Network Isolation (Timeouts & Retries).
+**Milestone 11 (Phase 2) complete** — Defensive Network Isolation (Timeouts & Retries).
+
+Milestone 10's `UserServiceClient` Feign call had no explicit timeout of its
+own, meaning it inherited Feign's built-in defaults (a 10s connect timeout, a
+60s read timeout) — generous enough that a slow user-service wouldn't fail
+the caller's request so much as just quietly hold its thread and connection
+open for up to a minute. `spring.cloud.openfeign.client.config.default.
+connect-timeout`/`read-timeout` (2000ms / 1500ms) is centralized in
+config-repo/application.yml under the `default` client name, so it applies to
+every Feign client platform-wide, present or future, not just today's one
+named "user-service" client — the same "inert on services that don't use it"
+centralization already used for Eureka's `defaultZone` in Milestone 10. The
+connect timeout stays generous (a TCP handshake to a sibling container on the
+same compose network should be near-instant, so a slow *connect* usually means
+something is actually wrong); the read timeout is deliberately tight, so a
+slow response fails fast instead of parking the calling thread (Q43/Q44 — see
+the Chaos Lab below for how to see the difference firsthand).
+
+Layered on top: a Resilience4j `@Retry("userServiceLookup")` on
+`UserServiceClient.getById` in both transaction-service and budget-service —
+annotated on the Feign interface method itself rather than on the
+`verifyUserExists` call site, since Resilience4j's annotation support is
+Spring-AOP-proxy-based and only intercepts calls arriving from outside the
+bean (a private method calling itself wouldn't be advised at all). The retry
+policy (also centralized in config-repo/application.yml) uses exponential
+backoff with randomized jitter — a fixed delay would have every concurrently-
+retrying caller hammering user-service again at the exact same instant, a
+self-inflicted thundering herd — and `retry-exceptions` is narrowed to
+`feign.RetryableException` specifically, the type Feign wraps connect/read-
+timeout and other I/O failures in. This deliberately excludes
+`FeignException.NotFound`: retrying a legitimate "this user doesn't exist"
+answer three times would be pure waste, and Q45's real point — retry only
+what's actually transient, never a definitive business answer. `spring-boot-
+starter-aop` (already present in both services' POMs since Milestone 9's fix
+commits) is what lets `resilience4j-spring-boot3` wire this up with zero
+`@Enable...` annotation needed anywhere.
+
+One honest limitation, left as-is on purpose rather than over-engineered
+away: Retry alone doesn't distinguish a one-off network blip from a
+genuinely overloaded downstream — three retries against a user-service that's
+actually struggling just adds three times the load. That's precisely the gap
+Milestone 12's Circuit Breaker closes (stop retrying into a downstream that's
+already failing), not something this milestone should reach ahead and solve.
+
+🔥 **Chaos Lab — try it yourself:**
+1. In `user-service`'s `UserController.getById`, temporarily add
+   `Thread.sleep(5000);` as the method's first line, then rebuild/restart just
+   that one container: `docker compose up -d --build user-service`.
+2. Fire a handful of concurrent requests at transaction-service through the
+   gateway (`for i in {1..10}; do curl -s -o /dev/null -w "%{http_code} %{time_total}s\n" -X POST http://localhost:8080/api/v1/transactions -H "Content-Type: application/json" -d '{"userId":"<existing-id>","categoryId":"<existing-id>","amount":10,"type":"EXPENSE","description":"chaos","transactionDate":"2026-10-01"}' & done; wait`).
+3. Watch the response times: each request fails in ~1.5-4.5s (one to three
+   retries, each capped by the 1.5s read timeout) instead of hanging for the
+   full 5s — proof the caller's threads/connections free up fast instead of
+   piling up behind a slow downstream, exactly the difference Milestone 9's
+   `docker stats` habit (Q39/Q40) would show as a thread-pool/connection-pool
+   problem if this timeout weren't in place.
+4. Revert the `Thread.sleep(5000)` line and rebuild user-service again before
+   moving on.
+
+Next: Milestone 12 — Fault Isolation State Machines (Circuit Breakers).
 
 ## API Versioning & Deprecation Policy
 

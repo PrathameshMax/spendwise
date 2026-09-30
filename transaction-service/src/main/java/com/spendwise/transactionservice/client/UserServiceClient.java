@@ -1,5 +1,6 @@
 package com.spendwise.transactionservice.client;
 
+import io.github.resilience4j.retry.annotation.Retry;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -21,10 +22,23 @@ import java.util.UUID;
  * endpoint) — spendwise-common carries zero business logic, so
  * budget-service declares its own identical-looking copy of this interface
  * rather than sharing this one.
+ *
+ * <p>{@code @Retry(name = "userServiceLookup")} (Milestone 11) is placed on
+ * this interface method, not on the {@code verifyUserExists} call site in
+ * {@code TransactionService} — Resilience4j's annotation support is
+ * Spring-AOP-proxy-based, so it only intercepts a call that arrives from
+ * outside the bean; {@code verifyUserExists} calls this method externally
+ * (crossing the Feign client bean's proxy boundary), which is exactly what
+ * makes the annotation effective here. The named instance's policy
+ * (exponential backoff + jitter, narrowed to {@code feign.RetryableException}
+ * only) is centralized in config-repo/application.yml alongside this
+ * platform's Feign connect/read timeouts, both being generic Feign
+ * infrastructure concerns rather than anything specific to this contract.
  */
 @FeignClient(name = "user-service")
 public interface UserServiceClient {
 
+    @Retry(name = "userServiceLookup")
     @GetMapping("/api/v1/users/{id}")
     UserExistenceResponse getById(@PathVariable("id") UUID id);
 }
