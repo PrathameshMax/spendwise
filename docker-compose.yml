@@ -78,6 +78,30 @@ services:
   # tree to resolve spendwise-common via `-am`.
   # ---------------------------------------------------------------------
 
+  # Milestone 10 — the Eureka registry every other service self-registers
+  # with. Deliberately absent from every other service's `depends_on` below:
+  # unlike config-server, whose `fail-fast: true` makes it a hard synchronous
+  # bootstrap dependency, Eureka client registration is asynchronous and
+  # best-effort — a service starts fine without it and simply retries
+  # registration in the background (Q41/Q42), so gating startup on it here
+  # would misrepresent that distinction rather than fix a real problem.
+  discovery-server:
+    build:
+      context: .
+      dockerfile: discovery-server/Dockerfile
+    container_name: spendwise-discovery-server
+    ports:
+      - "8761:8761"
+    restart: unless-stopped
+    healthcheck:
+      <<: *java-healthcheck
+      test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8761/actuator/health" ]
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 384M
+
   config-server:
     build:
       context: .
@@ -85,6 +109,8 @@ services:
     container_name: spendwise-config-server
     ports:
       - "8888:8888"
+    environment:
+      EUREKA_HOST: discovery-server
     restart: unless-stopped
     healthcheck:
       <<: *java-healthcheck
@@ -105,6 +131,7 @@ services:
     environment:
       DB_HOST: postgres
       CONFIG_SERVER_URL: http://config-server:8888
+      EUREKA_HOST: discovery-server
       MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
     depends_on:
       config-server:
@@ -131,6 +158,7 @@ services:
     environment:
       DB_HOST: postgres
       CONFIG_SERVER_URL: http://config-server:8888
+      EUREKA_HOST: discovery-server
       MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
     depends_on:
       config-server:
@@ -157,6 +185,7 @@ services:
     environment:
       DB_HOST: postgres
       CONFIG_SERVER_URL: http://config-server:8888
+      EUREKA_HOST: discovery-server
       MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
     depends_on:
       config-server:
@@ -183,6 +212,7 @@ services:
     environment:
       DB_HOST: postgres
       CONFIG_SERVER_URL: http://config-server:8888
+      EUREKA_HOST: discovery-server
       MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
     depends_on:
       config-server:
@@ -208,6 +238,7 @@ services:
       - "8085:8085"
     environment:
       CONFIG_SERVER_URL: http://config-server:8888
+      EUREKA_HOST: discovery-server
       MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
     depends_on:
       config-server:
@@ -231,6 +262,7 @@ services:
       - "8086:8086"
     environment:
       CONFIG_SERVER_URL: http://config-server:8888
+      EUREKA_HOST: discovery-server
       MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
     depends_on:
       config-server:
@@ -254,6 +286,7 @@ services:
       - "8080:8080"
     environment:
       CONFIG_SERVER_URL: http://config-server:8888
+      EUREKA_HOST: discovery-server
       MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
       # Milestone 9 — overrides the `localhost:<port>` defaults in
       # config-repo/api-gateway.yml with each downstream service's own

@@ -1,2 +1,3 @@
 com.spendwise.common.health.SpendwiseHealthAutoConfiguration
 com.spendwise.common.observability.SpendwiseObservationAutoConfiguration
+com.spendwise.common.tracing.SpendwiseFeignTracingAutoConfiguration

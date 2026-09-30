@@ -79,5 +79,16 @@
             <artifactId>micrometer-observation</artifactId>
             <optional>true</optional>
         </dependency>
+        <!-- Milestone 10 — needed only to compile SpendwiseFeignTracingAutoConfiguration's
+             RequestInterceptor bean against Feign's API. "optional" keeps this from leaking
+             as a mandatory transitive dependency into services (config-server, auth-service,
+             etc.) that never put spring-cloud-starter-openfeign on their own classpath — the
+             same "API here, implementation/starter at the edge" split already used for
+             spring-webmvc and jakarta.servlet-api above. -->
+        <dependency>
+            <groupId>io.github.openfeign</groupId>
+            <artifactId>feign-core</artifactId>
+            <optional>true</optional>
+        </dependency>
     </dependencies>
 </project>

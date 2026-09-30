@@ -42,3 +42,14 @@ scrape_configs:
       - targets: ["config-server:8888"]
         labels:
           service: config-server
+
+  # Milestone 10 — the Eureka registry itself is scraped exactly like every
+  # other infrastructure module (config-server above), separately from the
+  # business-service job so an outage of the registry doesn't get mixed into
+  # `spendwise-services`' per-service dashboards.
+  - job_name: spendwise-discovery-server
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["discovery-server:8761"]
+        labels:
+          service: discovery-server

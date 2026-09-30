@@ -10,6 +10,10 @@
       "value": "http://localhost:8888"
     },
     {
+      "key": "discoveryServerUrl",
+      "value": "http://localhost:8761"
+    },
+    {
       "key": "authServiceUrl",
       "value": "http://localhost:8081"
     },
@@ -145,6 +149,98 @@
         }
       ],
       "description": "Every other service bootstraps its configuration from here (Milestone 2). Start this first."
+    },
+    {
+      "name": "Discovery Server",
+      "item": [
+        {
+          "name": "View Registered Applications",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{discoveryServerUrl}}/eureka/apps",
+              "host": [
+                "{{discoveryServerUrl}}"
+              ],
+              "path": [
+                "eureka",
+                "apps"
+              ]
+            },
+            "description": "Eureka's own REST API (Milestone 10) \u2014 lists every application currently registered and each instance's status. The Accept header asks for JSON instead of Eureka's default XML response."
+          },
+          "response": []
+        },
+        {
+          "name": "Eureka Dashboard (browser only)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{discoveryServerUrl}}/",
+              "host": [
+                "{{discoveryServerUrl}}"
+              ],
+              "path": [
+                ""
+              ]
+            },
+            "description": "Eureka's built-in HTML dashboard \u2014 open this URL in a browser, not through Postman's Send, to see registered instances, their status, and the time since their last renewal at a glance."
+          },
+          "response": []
+        },
+        {
+          "name": "Actuator",
+          "item": [
+            {
+              "name": "Health",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{discoveryServerUrl}}/actuator/health",
+                  "host": [
+                    "{{discoveryServerUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "health"
+                  ]
+                },
+                "description": "Liveness/readiness aggregate health. Full detail is exposed by management.endpoint.health.show-details."
+              },
+              "response": []
+            },
+            {
+              "name": "Info",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{discoveryServerUrl}}/actuator/info",
+                  "host": [
+                    "{{discoveryServerUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "info"
+                  ]
+                },
+                "description": ""
+              },
+              "response": []
+            }
+          ],
+          "description": "Exposed since Milestone 10 (health, info, metrics, prometheus). No /refresh here \u2014 discovery-server is not a config-repo consumer."
+        }
+      ],
+      "description": "Eureka service registry (Milestone 10) \u2014 every other module self-registers with it. Start it any time relative to config-server; registration is asynchronous/best-effort, not a hard boot dependency."
     },
     {
       "name": "Auth Service",

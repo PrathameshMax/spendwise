@@ -38,3 +38,21 @@ spendwise:
     # HMAC key for the X-User-Context header (Milestone 6). Override via env var
     # in any real deployment; the default here is dev-only.
     user-context-secret: ${SPENDWISE_USER_CONTEXT_SECRET:dev-only-shared-secret-change-for-real-deployments}
+
+eureka:
+  client:
+    service-url:
+      # Milestone 10 — every business service and the API Gateway consume this
+      # config-repo file, so registering with Eureka is wired here once instead
+      # of eight times; ${EUREKA_HOST:localhost} mirrors the exact
+      # `${VAR:localhost}` override pattern DB_HOST/CONFIG_SERVER_URL already
+      # use for the same host-vs-container-name split between an IDE run and
+      # docker-compose.yml.
+      defaultZone: http://${EUREKA_HOST:localhost}:8761/eureka/
+  instance:
+    # Critical in Docker: without this, a service registers under its
+    # container hostname, which is frequently unresolvable by *other*
+    # containers trying to call it back via Feign/LoadBalancer. Registering
+    # the container's actual IP instead makes every instance directly
+    # routable on the compose network (Q41/Q42).
+    prefer-ip-address: true

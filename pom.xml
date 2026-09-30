@@ -13,6 +13,7 @@
 
     <modules>
         <module>spendwise-common</module>
+        <module>discovery-server</module>
         <module>config-server</module>
         <module>auth-service</module>
         <module>user-service</module>
@@ -21,9 +22,6 @@
         <module>notification-service</module>
         <module>analytics-service</module>
         <module>api-gateway</module>
-        <!-- discovery-server is added when Milestone 10 introduces it — an empty shell
-             of a registry has no meaningful content before that milestone's dependencies
-             exist. -->
     </modules>
 
     <properties>

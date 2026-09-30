@@ -12,6 +12,7 @@ Roadmaps: `SpendWise_Functional_Roadmap_v2` and `SpendWise_Technical_Roadmap_v2`
 | Module | Role |
 |---|---|
 | `spendwise-common` | Shared DTOs, exception hierarchy, correlation-ID filter, signed user-context filter |
+| `discovery-server` | Eureka service registry — every other module self-registers with it |
 | `api-gateway` | Edge entry point — OAuth2 resource server, JWT validation, refresh-cookie rotation |
 | `auth-service` | Identity issuance — OAuth2-style Authorization Server, JWT minting |
 | `user-service` | User profiles and preferences |
@@ -19,8 +20,6 @@ Roadmaps: `SpendWise_Functional_Roadmap_v2` and `SpendWise_Technical_Roadmap_v2`
 | `budget-service` | Spending caps, budget tracking |
 | `notification-service` | Async alert dispatch (Kafka consumer, no REST) |
 | `analytics-service` | CQRS read-side dashboard projections |
-
-`discovery-server` is added when Milestone 10 introduces it.
 
 ## Path to Polyrepo
 
@@ -61,6 +60,7 @@ memory limits included.
 docker compose up -d --build
 # api-gateway:            http://localhost:8080
 # each service also still reachable directly: 8081 (auth) .. 8086 (analytics), 8888 (config-server)
+# service registry: http://localhost:8761 (Eureka dashboard — registered instances)
 # traces:      http://localhost:9411
 # metrics:     http://localhost:9090 (Prometheus)
 # dashboards:  http://localhost:3000 (Grafana, admin / spendwise)
@@ -83,6 +83,10 @@ other service, since every service bootstraps its configuration from it:
 ```bash
 mvn clean install
 mvn -pl config-server spring-boot:run
+# discovery-server has no config-server dependency of its own — start it any
+# time, in any order relative to config-server (Milestone 10: Eureka client
+# registration is best-effort/asynchronous, not a hard boot dependency):
+mvn -pl discovery-server spring-boot:run
 # in a separate terminal, once config-server is listening on 8888:
 mvn -pl auth-service spring-boot:run
 # api-gateway needs auth-service's /oauth2/jwks reachable before it can validate
@@ -360,7 +364,76 @@ since Milestone 4 — the `localhost` default keeps IDE-based development
 and every service it scrapes share one compose network instead of Prometheus
 reaching out to the host.
 
-Next: Milestone 10 — Dynamic Discovery & Inter-Service Communication.
+**Milestone 10 (Phase 2) complete** — Dynamic Discovery & Inter-Service Communication.
+
+A new ninth module, `discovery-server`, is a standalone Netflix Eureka registry
+(`@EnableEurekaServer`, port 8761): `register-with-eureka`/`fetch-registry` are
+both `false` on the registry itself, since a single standalone instance is
+neither registering with nor pulling a peer list from itself — a real
+multi-node cluster would flip both to `true` and point `defaultZone` at its
+peers instead. Every other module now carries
+`spring-cloud-starter-netflix-eureka-client` and, unlike the Config Server
+client, needs no enabling annotation of its own — Spring Cloud auto-configures
+registration the moment the starter is on the classpath. The registration
+target itself (`eureka.client.service-url.defaultZone`) is centralized in
+`config-repo/application.yml` for the seven config-repo-consuming modules,
+following the same `${EUREKA_HOST:localhost}` convention `DB_HOST` and
+`CONFIG_SERVER_URL` already established; `config-server` itself is a config
+*producer*, not a consumer, so its own registration is set directly in its own
+`application.yml` instead. `eureka.instance.prefer-ip-address: true` is set
+platform-wide — without it, Eureka registers a container under its (often
+unresolvable-by-siblings) container hostname rather than its routable IP,
+which would silently break every Feign call below the moment services move
+from bare-metal/IDE runs into Docker (Q41/Q42).
+
+`discovery-server` is deliberately absent from every other service's
+`depends_on` in `docker-compose.yml`: `config-server`'s `fail-fast: true`
+makes it a hard synchronous boot dependency (a service can't even read its own
+`application.yml` without it), but Eureka client registration is asynchronous
+and best-effort by design — a service starts and serves traffic fine before
+its first successful registration, retrying quietly in the background. Gating
+container startup order on it would erase that real architectural
+distinction rather than fix an actual problem, so the ~30s propagation delay
+between a service registering and every client's local registry cache
+refreshing is a documented, deliberate characteristic of eventually-consistent
+service discovery, not a defect to engineer away.
+
+With a registry in place, `transaction-service` and `budget-service` gained
+the platform's first real synchronous inter-service call: before either can
+create a transaction or a budget, it now calls `user-service`'s existing
+`GET /api/v1/users/{id}` to confirm the referenced `userId` actually exists,
+via a `UserServiceClient` `@FeignClient(name = "user-service")` interface
+declared independently in each of the two consumers (not centralized in
+`spendwise-common`, whose "zero business logic" rule excludes any
+service-specific contract like this one — see "Path to Polyrepo" above). Each
+consumer also declares its own minimal `UserExistenceResponse(UUID id)`
+record rather than depending on `user-service`'s actual `UserResponse` DTO,
+deliberately decoupling the two services' contracts; Spring Boot's default
+Jackson configuration ignores the response fields this record doesn't
+declare. `@EnableFeignClients` is added explicitly to
+`TransactionServiceApplication`/`BudgetServiceApplication` — this one *does*
+need an enabling annotation, unlike the Eureka client — and a 404 from
+`user-service` (Feign's default error decoder throws
+`FeignException.NotFound`) is translated back into this platform's own
+`ResourceNotFoundException("UserProfile", userId)`, so the caller sees the
+same RFC 7807 shape (Milestone 7) whether the check happened locally or over
+the network.
+
+Finally, correlation-ID propagation across that call — a gap planted back in
+the Milestone 3 status note above ("deferred until Milestone 10, when there's
+an actual inter-service call to propagate across") — is closed by a new
+`spendwise-common` auto-configuration, `SpendwiseFeignTracingAutoConfiguration`,
+following the same `@AutoConfiguration`/`AutoConfiguration.imports` pattern
+`SpendwiseHealthAutoConfiguration` and `SpendwiseObservationAutoConfiguration`
+established: `@ConditionalOnClass(RequestInterceptor.class)` means it only
+activates for the two services that actually put OpenFeign on their
+classpath, registering a `RequestInterceptor` that copies the current
+`X-Correlation-ID` out of the SLF4J MDC onto every outgoing Feign request —
+the Feign equivalent of what `CorrelationIdFilter` already does for inbound
+servlet requests and `CorrelationIdGlobalFilter` does at the reactive API
+Gateway.
+
+Next: Milestone 11 — Defensive Network Isolation (Timeouts & Retries).
 
 ## API Versioning & Deprecation Policy
 

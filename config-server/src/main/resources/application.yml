@@ -30,3 +30,14 @@ logging:
   include-application-name: false
   pattern:
     correlation: "[${spring.application.name:},%X{correlationId:-},%X{traceId:-},%X{spanId:-}] "
+
+# Milestone 10 — config-server itself is a config *producer*, not a consumer
+# of config-repo (a service can't fetch its own bootstrap config from itself),
+# so unlike every other module its Eureka registration is set directly here
+# rather than in config-repo/application.yml.
+eureka:
+  client:
+    service-url:
+      defaultZone: http://${EUREKA_HOST:localhost}:8761/eureka/
+  instance:
+    prefer-ip-address: true
