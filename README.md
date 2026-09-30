@@ -50,8 +50,35 @@ layout needs to change for this — it's a build/repo reorganization, not a rede
 
 ## Running locally
 
-Config Server must be up before any other service, since every service now bootstraps
-its configuration from it:
+### Option A — everything via Docker Compose (Milestone 9)
+
+The simplest way to run the whole platform: every module now has its own
+multi-stage Dockerfile, and the root `docker-compose.yml` wires all of it
+together — infra, health-check-gated startup order, and per-container CPU/
+memory limits included.
+
+```bash
+docker compose up -d --build
+# api-gateway:            http://localhost:8080
+# each service also still reachable directly: 8081 (auth) .. 8086 (analytics), 8888 (config-server)
+# traces:      http://localhost:9411
+# metrics:     http://localhost:9090 (Prometheus)
+# dashboards:  http://localhost:3000 (Grafana, admin / spendwise)
+```
+
+Compose brings services up in dependency order — `postgres`/`config-server`
+first, then `auth`/`user`/`transaction`/`budget-service`, then `api-gateway`
+last — because each `depends_on` entry waits on `condition: service_healthy`,
+not merely on the upstream container having started (Q39/Q40: a JVM
+reporting "started" and its Spring context actually being ready to serve
+`/actuator/health` can be seconds apart). Rebuild after a code change with
+`docker compose up -d --build <service-name>`.
+
+### Option B — services via IDE/Maven, infra via Docker Compose
+
+Useful for active development on a single service, where an IDE's hot-reload
+beats a full image rebuild per change. Config Server must be up before any
+other service, since every service bootstraps its configuration from it:
 
 ```bash
 mvn clean install
@@ -62,6 +89,10 @@ mvn -pl auth-service spring-boot:run
 # any JWT, so start auth-service first; then, in further terminals:
 mvn -pl api-gateway spring-boot:run
 mvn -pl user-service spring-boot:run
+```
+
+```bash
+docker compose up -d zipkin postgres prometheus grafana
 ```
 
 As of Milestone 6, `api-gateway` (port 8080) is the intended entry point for every
@@ -75,20 +106,10 @@ collection already does.
 Config Server runs in `native` mode, serving property files from
 `config-server/src/main/resources/config-repo/` — no external Git repo or broker required.
 
-Zipkin (Milestone 3), PostgreSQL (Milestone 4), and Prometheus + Grafana
-(Milestone 5) all run via Docker Compose:
-
-```bash
-docker compose up -d zipkin postgres prometheus grafana
-# traces:      http://localhost:9411
-# metrics:     http://localhost:9090 (Prometheus)
-# dashboards:  http://localhost:3000 (Grafana, admin / spendwise)
-# postgres exposes 4 isolated databases: auth_db, user_db, transaction_db, budget_db
-```
-
 A Postman collection covering every live endpoint (business + Actuator + Metrics,
 one folder per service) lives at `postman/SpendWise.postman_collection.json` —
-import it directly.
+import it directly; every request still targets `localhost`, so it works unchanged
+against either option above.
 
 ## Status
 
@@ -292,7 +313,54 @@ other error path already carries (`VALIDATION_FAILED`) — without this, a
 validation failure would have been the one error response on the whole
 platform that didn't match the Milestone 7 contract.
 
-Next: Milestone 9 — Enterprise-Grade Containerization & Memory Quotas.
+**Milestone 9 (Phase 2) complete** — Enterprise-Grade Containerization & Memory Quotas.
+
+Every one of the platform's eight modules (`config-server` plus the six business
+services plus `api-gateway`) now has its own multi-stage Dockerfile
+(`<module>/Dockerfile`): a `maven:3.9.9-eclipse-temurin-21` build stage compiles
+just that module (`mvn -pl <module> -am`, so only `spendwise-common` plus the
+target module build, not the full nine-module reactor), and a slim
+`eclipse-temurin:21-jre-alpine` runtime stage copies out only the resulting fat
+jar — the JDK, Maven, and the entire dependency cache never reach the image
+that actually ships (Q39). Every runtime image sets
+`JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError"`:
+JDK 21 already detects a container's cgroup memory limit, but its default
+`MaxRAMPercentage` (25%) leaves most of a constrained container unused by the
+heap; 75% is the standard production compromise that still leaves headroom
+for metaspace, thread stacks, and direct buffers — the actual cause of most
+"heap graph looked fine but the container still got OOMKilled" incidents
+(Q40), since the kernel's OOM killer accounts for the JVM's total RSS, not
+just heap. `ExitOnOutOfMemoryError` turns a corrupted, half-alive JVM into a
+clean process exit so Compose's `restart: unless-stopped` policy has
+something to actually recover from.
+
+The root `docker-compose.yml` — third-party backends only since Milestones
+3-5, per that file's own forward-reference comment — now builds and wires all
+eight of our own services in too: health-check-gated `depends_on` (config-server
+and postgres before the business services; those before api-gateway, since
+Compose's `condition: service_healthy` polls each image's `HEALTHCHECK`
+instruction against `/actuator/health`, not merely "the process started") and
+a `deploy.resources.limits` CPU/memory quota per service, so one runaway
+container can't starve the others on a shared host. `postgres` gets an
+explicit `pg_isready` healthcheck of its own, since the official image ships
+none.
+
+Containerizing services that used to all share one host's `localhost`
+surfaced the one piece of cross-service wiring that assumed that: api-gateway's
+routes and its JWKS URI (`config-repo/api-gateway.yml`) were hardcoded to
+`localhost:<port>`, which breaks the moment api-gateway and every business
+service become separate containers with separate network namespaces. Each
+host is now parameterized (`http://${AUTH_SERVICE_HOST:localhost}:8081`,
+etc.) using the exact same `${VAR:localhost}` convention `DB_HOST` has used
+since Milestone 4 — the `localhost` default keeps IDE-based development
+(Option B below) working unchanged, while docker-compose.yml overrides each
+`*_SERVICE_HOST` env var to the target's own compose service name.
+`infra/prometheus/prometheus.yml`'s scrape targets moved the same way — from
+`host.docker.internal:<port>` to `<service-name>:<port>` — now that Prometheus
+and every service it scrapes share one compose network instead of Prometheus
+reaching out to the host.
+
+Next: Milestone 10 — Dynamic Discovery & Inter-Service Communication.
 
 ## API Versioning & Deprecation Policy
 

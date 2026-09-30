@@ -1,0 +1,16 @@
+# Milestone 9 — every service's Dockerfile builds with the monorepo root as
+# its context (`docker-compose.yml`'s `build.context: .`), since Maven's
+# reactor needs the whole tree on disk to resolve `spendwise-common` via
+# `-am`. This file keeps that context to source + POMs only, so the upload to
+# the Docker daemon stays fast and a locally-built `target/` from an IDE run
+# never leaks into a stage that runs its own `mvn clean package`.
+.git
+.gitignore
+**/target/
+**/*.iml
+.idea/
+*.log
+.DS_Store
+postman/
+infra/
+*.docx
