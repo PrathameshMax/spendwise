@@ -45,11 +45,11 @@ class TransactionRepositoryIT {
         Category dining = categoryRepository.save(new Category("Dining", false));
 
         transactionRepository.save(new Transaction(userId, electronics, new BigDecimal("12000.00"),
-                TransactionType.EXPENSE, "Headphones", LocalDate.of(2026, 9, 10)));
+                TransactionType.EXPENSE, "Headphones", LocalDate.of(2026, 9, 10), "INR", new BigDecimal("12000.00")));
         transactionRepository.save(new Transaction(userId, dining, new BigDecimal("800.00"),
-                TransactionType.EXPENSE, "Dinner", LocalDate.of(2026, 9, 12)));
+                TransactionType.EXPENSE, "Dinner", LocalDate.of(2026, 9, 12), "INR", new BigDecimal("800.00")));
         transactionRepository.save(new Transaction(userId, electronics, new BigDecimal("3000.00"),
-                TransactionType.EXPENSE, "Cable", LocalDate.of(2026, 8, 1)));
+                TransactionType.EXPENSE, "Cable", LocalDate.of(2026, 8, 1), "INR", new BigDecimal("3000.00")));
 
         var spec = TransactionSpecifications.combine(
                 TransactionSpecifications.hasUserId(userId),
@@ -67,7 +67,7 @@ class TransactionRepositoryIT {
     void unfilteredSpecificationReturnsEverything() {
         Category category = categoryRepository.save(new Category("Groceries", false));
         transactionRepository.save(new Transaction(UUID.randomUUID(), category, BigDecimal.TEN,
-                TransactionType.EXPENSE, "Milk", LocalDate.now()));
+                TransactionType.EXPENSE, "Milk", LocalDate.now(), "INR", BigDecimal.TEN));
 
         var spec = TransactionSpecifications.combine(null, null, null, null, null, null, null);
         var page = transactionRepository.findAll(spec, PageRequest.of(0, 10));
