@@ -1,6 +1,7 @@
 package com.spendwise.transactionservice.client;
 
 import com.spendwise.common.exception.DownstreamServiceUnavailableException;
+import feign.FeignException;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import io.github.resilience4j.retry.annotation.Retry;
 import org.slf4j.Logger;
@@ -55,10 +56,19 @@ import java.util.UUID;
  * <p>Both the retry policy (config-repo/application.yml) and the circuit
  * breaker policy (this service's own application.yml) exclude
  * {@code feign.FeignException$NotFound} via their respective
- * {@code ignore-exceptions} — without that, a perfectly healthy user-service
- * answering "no such user" would both count as a circuit-breaker failure and
- * get misrouted through {@link #getByIdFallback}, turning a correct 404 into
- * a false 503 (Q47 — a business answer is not a partial failure).
+ * {@code ignore-exceptions} — this keeps a 404 out of the retry decision
+ * (it is never retried) and out of the circuit's failure-rate sliding
+ * window (it is never counted as a failure). It does <b>not</b>, by itself,
+ * keep a 404 out of {@link #getByIdFallback}: Resilience4j-Spring's
+ * fallback-routing wrapper invokes the configured {@code fallbackMethod} for
+ * <i>any</i> exception that propagates out of the decorated call, regardless
+ * of {@code ignore-exceptions} — that config only governs the Retry/
+ * CircuitBreaker core logic, not the separate AOP layer that dispatches to a
+ * fallback. Left alone, a perfectly healthy user-service answering "no such
+ * user" would still reach the fallback and get misrouted into a false 503
+ * (Q47 — a business answer is not a partial failure). The actual guard is in
+ * {@link #getByIdFallback} itself, which inspects the throwable and rethrows
+ * {@code FeignException.NotFound} unchanged instead of converting it.
  */
 @FeignClient(name = "user-service")
 public interface UserServiceClient {
@@ -72,16 +82,26 @@ public interface UserServiceClient {
 
     /**
      * Invoked once the Retry+CircuitBreaker chain above has given up on
-     * {@link #getById}: either every retry attempt failed, or the circuit was
-     * already OPEN and rejected the call instantly (Q46 — "shielding your
-     * thread pool" by never even attempting the call once tripped). Reaching
-     * this point means user-service itself is the problem, not the specific
-     * userId being looked up — {@code FeignException.NotFound} never arrives
-     * here (see class Javadoc), so every invocation of this fallback is a
-     * genuine, type-safe "can't tell you right now" rather than a
-     * misclassified "doesn't exist" (Q47).
+     * {@link #getById} — <b>or</b> whenever {@link #getById} throws at all,
+     * since Resilience4j-Spring's fallback wrapper catches unconditionally
+     * and does not consult {@code ignore-exceptions} (see class Javadoc).
+     * {@code FeignException.NotFound} must therefore be screened out here,
+     * explicitly, rather than relied on to never arrive: it is rethrown
+     * unchanged so it reaches {@code TransactionService}'s existing
+     * {@code catch (FeignException.NotFound ex)} block exactly as it would
+     * without any Resilience4j decoration at all.
+     *
+     * <p>Anything else reaching this point means user-service itself is the
+     * problem, not the specific userId being looked up — either every retry
+     * attempt failed, or the circuit was already OPEN and rejected the call
+     * instantly (Q46 — "shielding your thread pool" by never even attempting
+     * the call once tripped) — so it is a genuine, type-safe "can't tell you
+     * right now" rather than a misclassified "doesn't exist" (Q47).
      */
     default UserExistenceResponse getByIdFallback(UUID id, Throwable throwable) {
+        if (throwable instanceof FeignException.NotFound notFound) {
+            throw notFound;
+        }
         LOG.warn("user-service lookup fell back for userId={}: {}", id, throwable.toString());
         throw new DownstreamServiceUnavailableException("user-service", throwable);
     }

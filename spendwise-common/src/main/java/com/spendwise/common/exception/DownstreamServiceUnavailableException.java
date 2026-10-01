@@ -17,6 +17,15 @@ import org.springframework.http.HttpStatus;
  * reuse this same exception instead of each inventing its own, consistent
  * with this module's "zero business logic, only generic plumbing" rule (see
  * README, "Path to Polyrepo").
+ *
+ * <p>Note for any future caller wiring up a {@code fallbackMethod} of its
+ * own: Resilience4j's {@code ignore-exceptions} config does not prevent a
+ * fallback from being invoked for an ignored exception — it only controls
+ * the Retry/CircuitBreaker core decision (whether to retry, whether it
+ * counts toward the failure-rate window). A fallback that should pass a
+ * particular exception through untouched (a 404, say) must check for it
+ * explicitly and rethrow, as {@code UserServiceClient.getByIdFallback}
+ * does, rather than relying on {@code ignore-exceptions} alone.
  */
 public class DownstreamServiceUnavailableException extends SpendWiseException {
 

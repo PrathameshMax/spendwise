@@ -49,6 +49,10 @@ resilience4j:
         automatic-transition-from-open-to-half-open-enabled: true
         # Same reasoning as the Retry ignore-exceptions above: a 404 is a
         # correct, healthy answer from user-service, not a failure — it must
-        # never count against this circuit's failure-rate window.
+        # never count against this circuit's failure-rate window. Note this
+        # is purely about the circuit's own bookkeeping — it does not, by
+        # itself, stop a 404 from reaching UserServiceClient.getByIdFallback;
+        # that guard is the explicit instanceof check inside the fallback
+        # method itself (see its Javadoc).
         ignore-exceptions:
           - feign.FeignException$NotFound

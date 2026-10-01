@@ -531,14 +531,36 @@ and rejected the call outright with `CallNotPermittedException`" (Q46).
 service name like `ResourceNotFoundException` is by resource name, so any
 future circuit-breaker-protected call can reuse it), mapped to `503 Service
 Unavailable` through the same `AbstractGlobalExceptionHandler` every other
-`SpendWiseException` already uses — no new handler code needed. Getting this
-right required one correctness detail easy to miss: both the retry policy and
-the new circuit breaker policy exclude `feign.FeignException$NotFound` via
-their own `ignore-exceptions`. Without that, a perfectly healthy user-service
-correctly answering "no such user" would both count as a circuit-breaker
-failure *and* get misrouted through the fallback — turning a correct 404 into
-a false 503. A business answer is not a partial failure (Q47); only a
-genuinely broken or overloaded downstream should ever reach the fallback.
+`SpendWiseException` already uses — no new handler code needed.
+
+Getting this right required one correctness detail that a first pass got
+wrong (caught by actually load-testing the 404 path, not by code review —
+see **Post-ship correction** below): both the retry policy and the circuit
+breaker policy exclude `feign.FeignException$NotFound` via their own
+`ignore-exceptions`, but that config *only* governs each policy's own core
+decision — whether Retry attempts again, whether the circuit counts the call
+as a failure. It does **not** stop Resilience4j-Spring's fallback-routing
+wrapper from invoking `fallbackMethod`, which catches *any* exception the
+decorated call produces regardless of `ignore-exceptions`. The real guard is
+inside `getByIdFallback` itself: it inspects the throwable and rethrows
+`FeignException.NotFound` unchanged, letting it reach
+`TransactionService`'s existing `catch (FeignException.NotFound ex)` block
+exactly as it would with no Resilience4j decoration at all. Only a
+genuinely broken or overloaded downstream — not a legitimate "no such
+user" — now reaches the fallback's `503` conversion. A business answer is
+not a partial failure (Q47).
+
+> **Post-ship correction.** The first Milestone 12 commit (`e835474`) relied
+> solely on the two `ignore-exceptions` entries above to keep a 404 out of
+> the fallback, which is incorrect for the reason just explained — a
+> 404 was still reaching `getByIdFallback` and coming back as a false `503`.
+> Running the validation steps below against a real request caught it
+> immediately. The fix adds the explicit `instanceof FeignException.NotFound`
+> rethrow inside `getByIdFallback`; the `ignore-exceptions` entries stay,
+> since they're still correct and necessary for their own narrower purpose
+> (keeping a 404 out of the retry decision and out of the circuit's
+> failure-rate bookkeeping), just not sufficient on their own to protect the
+> fallback.
 
 🔥 **Chaos Lab — try it yourself:**
 1. In `user-service`'s `UserController.getById`, temporarily replace the

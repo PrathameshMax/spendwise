@@ -76,15 +76,17 @@ resilience4j:
         randomized-wait-factor: 0.5
         retry-exceptions:
           - feign.RetryableException
-        # Milestone 12 — transaction-service's copy of this Feign client now
-        # carries a fallbackMethod (its own application.yml's
-        # resilience4j.circuitbreaker.instances.userServiceLookup), and a
-        # fallbackMethod is invoked for ANY exception the call ultimately
-        # produces, not just ones matched by retry-exceptions above. Without
-        # this, a legitimate 404 would reach the fallback and get
-        # misclassified as "user-service unavailable" instead of "no such
-        # user" (Q47). Harmless no-op for budget-service today, which has no
-        # fallback of its own yet.
+        # Milestone 12 — keeps a 404 out of the retry DECISION only: it is
+        # never retried (retrying "no such user" three times is pointless).
+        # This does NOT, by itself, keep a 404 away from
+        # UserServiceClient.getByIdFallback — Resilience4j-Spring's
+        # fallback-routing wrapper invokes fallbackMethod for any exception
+        # the call ultimately produces, ignore-exceptions or not. The actual
+        # guard against a 404 being misclassified as "user-service
+        # unavailable" lives in getByIdFallback itself (an explicit
+        # instanceof FeignException.NotFound rethrow) — see its Javadoc.
+        # Harmless no-op for budget-service today, which has no fallback of
+        # its own yet.
         ignore-exceptions:
           - feign.FeignException$NotFound
 
