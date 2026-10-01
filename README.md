@@ -872,7 +872,10 @@ only "this one attempt."
 
 **Milestone 14 complete** — Edge Throttling (Redis Token Bucket Rate
 Limiting). No fixes were raised validating Milestone 13, so nothing folds in
-here beyond this milestone's own scope.
+here beyond this milestone's own scope — but live validation of Milestone 14
+itself surfaced a real bug in its first implementation, corrected in the same
+milestone rather than deferred (see "Found and fixed during validation"
+below); what's described here is the corrected, working version.
 
 Scoped exactly to the roadmap's two sentences: spin up Redis, and configure a
 Redis-backed token-bucket filter directly inside api-gateway so a burst never
@@ -884,29 +887,35 @@ Gateway's own built-in `RedisRateLimiter` (confirmed against its
 [reference documentation](https://docs.spring.io/spring-cloud-gateway/reference/spring-cloud-gateway/gatewayfilter-factories/requestratelimiter-factory.html)
 to actually implement the Token Bucket Algorithm the roadmap names, not
 assumed): adding `spring-boot-starter-data-redis-reactive` to `api-gateway`'s
-classpath is what makes the `RedisRateLimiter` bean available at all, and
-`spring.cloud.gateway.default-filters` (config-repo/api-gateway.yml) applies
-its `RequestRateLimiter` filter to *every* route — not one route's filter
-chain — matching "before they reach any core service" rather than "before
-they reach auth-service." `replenishRate: 10` / `burstCapacity: 20` /
-`requestedTokens: 1` are the exact property names `RedisRateLimiter` exposes
-and mirror Spring's own documented example values.
+classpath is what makes `RedisRateLimiter` available at all. `RouteConfig`
+applies it to *every* route it declares — including the docs-proxy loop, not
+just the business/auth routes — matching "before they reach any core
+service" rather than "before they reach auth-service."
+`REPLENISH_RATE: 10` / `BURST_CAPACITY: 20` / `REQUESTED_TOKENS: 1`
+(`RateLimitConfig`'s `RedisRateLimiter` bean constructor) mirror Spring's own
+documented example values for these same three parameters.
 
-**`RateLimitConfig`** (new, `api-gateway/config`) supplies the one piece
-Spring Cloud Gateway can't default sensibly on its own: the `KeyResolver`
-bean the filter's `key-resolver: "#{@remoteAddressKeyResolver}"` SpEL
-reference points at. The built-in default, `PrincipalNameKeyResolver`, keys
-on the authenticated principal — useless for exactly the two endpoints this
-milestone's own threat model (brute-force) centers on, `POST
-/api/v1/auth/login` and `/register`, both `permitAll()` and therefore
-carrying no principal at all; worse, Spring Cloud Gateway denies a request
-outright when its `KeyResolver` yields no key, so a principal-keyed resolver
-would end up blocking all unauthenticated traffic rather than throttling it.
-`remoteAddressKeyResolver` keys on client IP instead — the one identity every
-request has, authenticated or not — with a named fallback key
-(`"unresolved-remote-address"`) rather than `Mono.empty()` for the rare case
-the remote address itself can't be resolved, so that edge case degrades to
-one shared bucket instead of an outright, confusing deny.
+**`RateLimitConfig`** (new, `api-gateway/config`) supplies the two pieces
+Spring Cloud Gateway can't default sensibly on its own: the `RedisRateLimiter`
+bean itself (its three-`int` constructor — replenishRate, burstCapacity,
+requestedTokens — works as a plain `@Bean` because `RedisRateLimiter`
+implements `ApplicationContextAware` and looks up its own
+`ReactiveStringRedisTemplate`/`RedisScript` from the context the moment
+Spring calls `setApplicationContext` on it, confirmed directly against its
+[source](https://github.com/spring-cloud/spring-cloud-gateway/blob/main/spring-cloud-gateway-server/src/main/java/org/springframework/cloud/gateway/filter/ratelimit/RedisRateLimiter.java)),
+and the `KeyResolver` bean `RouteConfig` passes alongside it. The built-in
+default `KeyResolver`, `PrincipalNameKeyResolver`, keys on the authenticated
+principal — useless for exactly the two endpoints this milestone's own
+threat model (brute-force) centers on, `POST /api/v1/auth/login` and
+`/register`, both `permitAll()` and therefore carrying no principal at all;
+worse, Spring Cloud Gateway denies a request outright when its `KeyResolver`
+yields no key, so a principal-keyed resolver would end up blocking all
+unauthenticated traffic rather than throttling it. `remoteAddressKeyResolver`
+keys on client IP instead — the one identity every request has, authenticated
+or not — with a named fallback key (`"unresolved-remote-address"`) rather
+than `Mono.empty()` for the rare case the remote address itself can't be
+resolved, so that edge case degrades to one shared bucket instead of an
+outright, confusing deny.
 
 Redis itself gets an explicit `spring.data.redis.timeout: 1000ms`
 (config-repo/api-gateway.yml) for the same reason every other external
@@ -925,11 +934,41 @@ the whole Gateway" into "degraded Redis fails open quickly," consistent with
 this platform's one rule for every dependency it doesn't own: never wait on
 it unbounded.
 
+**Found and fixed during validation — `default-filters` is a no-op for
+Java-DSL routes.** The first implementation put the `RequestRateLimiter`
+filter in `spring.cloud.gateway.default-filters` (config-repo/api-gateway.yml)
+rather than in code, on the reasonable-sounding assumption that a
+default-filter applies platform-wide regardless of how a route is declared.
+Live validation disproved it immediately and unambiguously: 25 requests fired
+at `/api/v1/auth/login` past the configured burst capacity of 20 all still
+returned `401` (never `429`), and `redis-cli KEYS 'request_rate_limiter.*'`
+came back completely empty — meanwhile `/actuator/health` showed Redis itself
+as `UP`, proving the connection worked and the filter simply never ran.
+Root cause, confirmed against a maintainer-acknowledged report of the exact
+same mismatch
+([spring-cloud-gateway#3121](https://github.com/spring-cloud/spring-cloud-gateway/issues/3121)):
+`default-filters` only attaches to routes sourced from a
+`RouteDefinitionLocator` (YAML/properties-defined routes) — every route in
+this platform, since Milestone 6, is instead built via `RouteLocatorBuilder`'s
+Java fluent DSL in `RouteConfig`, which `default-filters` silently never
+touches. The fix moved the filter into `RouteConfig` itself: a shared private
+`rateLimited(...)` helper applies `.requestRateLimiter(c ->
+c.setRateLimiter(redisRateLimiter).setKeyResolver(keyResolver))` to every
+declared route, and `RedisRateLimiter`'s token-bucket values moved from inert
+YAML filter args onto its own bean constructor in `RateLimitConfig` (the
+filter's own `Config` object exposes only `setRateLimiter`/`setKeyResolver`
+in the fluent API, not the rate values themselves — confirmed against a
+working [Baeldung reference example](https://www.baeldung.com/spring-cloud-gateway-rate-limit-by-client-ip)
+and [spring-cloud-gateway#2246](https://github.com/spring-cloud/spring-cloud-gateway/issues/2246)).
+The inert YAML block was removed rather than left alongside the real fix,
+the same call Milestone 13 made for `DedupeResponseHeader` when it turned out
+not to work either.
+
 **Q51: How do you implement rate limiting / throttling at the gateway
 level?** By making the gateway itself the enforcement point, before a request
-ever reaches a core service — exactly what `spring.cloud.gateway.default-
-filters`' `RequestRateLimiter` entry does here, applied platform-wide rather
-than per-route. Three pieces are needed: an algorithm and its state (this
+ever reaches a core service — exactly what `RouteConfig`'s shared
+`requestRateLimiter` filter does here, applied to every route rather than
+one. Three pieces are needed: an algorithm and its state (this
 platform uses `RedisRateLimiter`'s token bucket, with the bucket's token
 count held in Redis rather than in-process, so the limit holds correctly
 across every api-gateway instance sharing that Redis, not per-instance); a

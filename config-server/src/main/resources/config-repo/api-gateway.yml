@@ -74,29 +74,29 @@ spring:
       # either allowing or denying them promptly — a real, reported failure
       # mode (spring-cloud/spring-cloud-gateway#3373), not a hypothetical one.
       timeout: 1000ms
-  cloud:
-    gateway:
-      default-filters:
-        # Milestone 14 — registered as a default-filter, not scoped to one
-        # route, so every route gets the same protection ("drop brute-force
-        # or malicious bursts before they reach any core service" — not just
-        # auth-service's). redis-rate-limiter.* are the exact property names
-        # Spring Cloud Gateway's own RedisRateLimiter exposes for its Token
-        # Bucket Algorithm implementation (Q51/Q52): replenishRate is tokens
-        # refilled per second, burstCapacity is the bucket's ceiling,
-        # requestedTokens is the cost of one request. 10/20 mirror Spring's
-        # own documented example values — generous enough that no legitimate
-        # user session trips it, tight enough to reproduce in the README's
-        # Chaos Lab within a few seconds of looped requests. key-resolver
-        # points at RateLimitConfig#remoteAddressKeyResolver — see its
-        # Javadoc for why this is keyed by client IP, not the authenticated
-        # principal.
-        - name: RequestRateLimiter
-          args:
-            redis-rate-limiter.replenishRate: 10
-            redis-rate-limiter.burstCapacity: 20
-            redis-rate-limiter.requestedTokens: 1
-            key-resolver: "#{@remoteAddressKeyResolver}"
+  # Milestone 14 fix (caught validating Milestone 14 itself, before any
+  # pending-fixes list even came into it) — spring.cloud.gateway.default-
+  # filters used to carry a RequestRateLimiter entry here
+  # (redis-rate-limiter.replenishRate/burstCapacity/requestedTokens, 10/20/1,
+  # key-resolver pointing at RateLimitConfig#remoteAddressKeyResolver). Live
+  # testing disproved it: a default-filter only attaches to routes sourced
+  # from a RouteDefinitionLocator (YAML/properties-defined routes) — every
+  # route in this platform is instead built via RouteLocatorBuilder's Java
+  # fluent DSL in RouteConfig, which default-filters silently never touches
+  # (confirmed against spring-cloud-gateway#3121, a maintainer-acknowledged
+  # report of the exact same mismatch). Redis itself connected fine
+  # (/actuator/health reported it UP), but 25 requests past the configured
+  # burst capacity all still reached auth-service, and `redis-cli KEYS
+  # 'request_rate_limiter.*'` came back empty — proof the filter was
+  # configured but never actually invoked. The real fix is now in code:
+  # RateLimitConfig declares an explicit RedisRateLimiter bean (same 10/20/1
+  # values, now set via its constructor rather than filter args, since
+  # RequestRateLimiterGatewayFilterFactory.Config exposes only
+  # setRateLimiter/setKeyResolver — see its Javadoc for the full trail), and
+  # RouteConfig applies it to every declared route directly. Left removed
+  # here rather than kept alongside the real fix as redundant, inert config
+  # that would misleadingly suggest it's doing something — the same call
+  # Milestone 13 already made for DedupeResponseHeader below.
   # Milestone 13 fix — DedupeResponseHeader=X-Correlation-ID, RETAIN_FIRST used
   # to live here as a default-filter, but live testing kept showing the header
   # duplicated anyway: this filter's dedup logic runs in its own post-phase,
