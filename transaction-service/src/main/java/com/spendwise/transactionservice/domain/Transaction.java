@@ -48,18 +48,34 @@ public class Transaction {
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
+    // Milestone 13 — the ISO 4217 code the entry was actually recorded in
+    // (validated at the API boundary by CreateTransactionRequest), and, only
+    // when that differs from the user's preferred currency, the amount
+    // ExchangeRateClient converted it to. amount/currency are never
+    // overwritten with the converted figure — the ledger keeps exactly what
+    // the user entered, with the converted figure stored alongside it rather
+    // than in place of it.
+    @Column(nullable = false, length = 3)
+    private String currency;
+
+    @Column(name = "base_currency_amount", precision = 19, scale = 2)
+    private BigDecimal baseCurrencyAmount;
+
     protected Transaction() {
         // required by JPA
     }
 
     public Transaction(UUID userId, Category category, BigDecimal amount, TransactionType type,
-                        String description, LocalDate transactionDate) {
+                        String description, LocalDate transactionDate, String currency,
+                        BigDecimal baseCurrencyAmount) {
         this.userId = userId;
         this.category = category;
         this.amount = amount;
         this.type = type;
         this.description = description;
         this.transactionDate = transactionDate;
+        this.currency = currency;
+        this.baseCurrencyAmount = baseCurrencyAmount;
         this.createdAt = Instant.now();
     }
 
@@ -93,5 +109,13 @@ public class Transaction {
 
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    public String getCurrency() {
+        return currency;
+    }
+
+    public BigDecimal getBaseCurrencyAmount() {
+        return baseCurrencyAmount;
     }
 }

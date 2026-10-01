@@ -32,6 +32,22 @@ spring:
     hibernate:
       ddl-auto: validate
   cloud:
+    loadbalancer:
+      retry:
+        # Milestone 13 fix (caught validating Milestone 12) — Spring Cloud
+        # LoadBalancer wraps every load-balanced RestClient/Feign call in its
+        # OWN retry layer by default, completely independent of and unaware of
+        # Resilience4j's @Retry below. The two stacked silently: each
+        # Resilience4j retry attempt was itself being retried again by
+        # LoadBalancer underneath, multiplying the configured max-attempts: 3
+        # into up to 9 real HTTP attempts — a failure that should have surfaced
+        # in ~5s (3 attempts with backoff) instead took 9.6s. Resilience4j's
+        # Retry is the platform's single, intentionally-tuned (backoff +
+        # jitter) retry policy for this call; LoadBalancer's own retry is
+        # redundant on top of it and disabled platform-wide here rather than
+        # per-client, since any future load-balanced client should get the
+        # same single-layer-of-retry guarantee.
+        enabled: false
     openfeign:
       client:
         config:
@@ -89,6 +105,32 @@ resilience4j:
         # its own yet.
         ignore-exceptions:
           - feign.FeignException$NotFound
+  timelimiter:
+    instances:
+      # Milestone 13 — same instance name as the retry/circuit-breaker
+      # policies above, deliberately: all three names the one logical
+      # protected operation (transaction-service's user-existence lookup),
+      # even though this one piece of config only takes effect through
+      # AsyncUserServiceLookup's new wrapper method, not UserServiceClient
+      # itself (see that class's Javadoc for why a @TimeLimiter can't be
+      # declared directly on a @FeignClient method at all). Sits here in the
+      # shared file, not transaction-service's own application.yml, on the
+      # same "every Feign client" reasoning Milestone 11's timeouts used —
+      # budget-service gets this instance name available too the day it grows
+      # its own async wrapper, with nothing to configure twice.
+      userServiceLookup:
+        # Must exceed the Retry+CircuitBreaker chain's own worst-case
+        # duration underneath it, or this becomes the thing that cuts retries
+        # off early rather than a true outer ceiling: 3 attempts, each up to
+        # the 1.5s read-timeout above, plus two backoff waits (200ms and
+        # ~400ms before jitter) between them, is already close to 5s in the
+        # worst case the Milestone 11 pending-fix note measured directly
+        # (9.6s before disabling the duplicated LoadBalancer retry; ~5s is
+        # the real, single-layer worst case this is bounding). 7s leaves
+        # comfortable headroom above that while still being a real,
+        # meaningful ceiling — not "so large it can never fire."
+        timeout-duration: 7s
+        cancel-running-future: true
 
 spendwise:
   security:

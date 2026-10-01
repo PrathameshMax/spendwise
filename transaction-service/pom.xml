@@ -20,6 +20,25 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
+        <!-- Milestone 13 — WebClient for ExchangeRateClient's call to the
+             external exchange-rate API (Functional Roadmap: "a resilient
+             WebClient call to the external exchange-rate API"), not Feign:
+             this is a genuine third-party HTTP API, not a sibling,
+             Eureka-registered microservice, so there is no service contract
+             to express as a declarative @FeignClient interface against.
+             Adding spring-boot-starter-webflux alongside the existing
+             spring-boot-starter-web does NOT turn this into a reactive
+             application — Spring Boot's embedded-server auto-configuration
+             still picks Tomcat (ServletWebServerFactoryAutoConfiguration
+             takes precedence whenever spring-boot-starter-web's servlet API
+             is present), this dependency only brings WebClient.Builder's
+             auto-configuration onto the classpath. The actual call stays
+             blocking (see ExchangeRateClient's Javadoc) — exactly what
+             ThreadPoolBulkhead below exists to isolate onto its own pool. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webflux</artifactId>
+        </dependency>
         <dependency>
             <groupId>io.micrometer</groupId>
             <artifactId>micrometer-tracing-bridge-otel</artifactId>

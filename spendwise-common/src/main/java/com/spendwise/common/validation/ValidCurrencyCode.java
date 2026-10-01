@@ -13,8 +13,9 @@ import java.lang.annotation.Target;
  * Custom Bean Validation constraint (Milestone 8) asserting that a string is a
  * valid ISO 4217 currency code (e.g. {@code "INR"}, {@code "USD"}) recognized by
  * the JVM's own {@link java.util.Currency} registry, rather than an arbitrary
- * free-text string. Applied to {@code UserRequest.preferredCurrency()} — the only
- * currency-shaped field in the platform.
+ * free-text string. Applied to {@code UserRequest.preferredCurrency()} and, since
+ * Milestone 13, {@code CreateTransactionRequest.currency()} — the two
+ * currency-shaped fields in the platform.
  *
  * Deliberately null-tolerant (see {@link CurrencyCodeValidator}): presence is a
  * separate concern owned by {@code @NotBlank}, scoped per Bean Validation group,

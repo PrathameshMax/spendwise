@@ -55,7 +55,14 @@ spring:
     # instead, keeping the error format consistent platform-wide with no custom code.
     problemdetails:
       enabled: true
-  cloud:
-    gateway:
-      default-filters:
-        - DedupeResponseHeader=X-Correlation-ID, RETAIN_FIRST
+  # Milestone 13 fix — DedupeResponseHeader=X-Correlation-ID, RETAIN_FIRST used
+  # to live here as a default-filter, but live testing kept showing the header
+  # duplicated anyway: this filter's dedup logic runs in its own post-phase,
+  # which does not reliably land after Gateway's own internal step that copies
+  # the proxied response's headers (including the downstream service's own
+  # echoed X-Correlation-ID) onto the exchange. The actual fix is now in code —
+  # CorrelationIdGlobalFilter decorates the response to set() the header at
+  # the real write-commit point, which this config-only filter could not
+  # guarantee. Left removed rather than kept alongside the real fix as
+  # redundant, unreliable config that would misleadingly suggest it's doing
+  # something.

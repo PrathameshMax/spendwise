@@ -1,0 +1,65 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+# Milestone 13 fix (pending fix noted during Milestone 12 validation) —
+# identical to prometheus.yml except every target host is host.docker.internal
+# instead of a compose service name. Prometheus itself still runs as a
+# container (README's "Option B" starts it via `docker compose up -d ...
+# prometheus ...`), but in Option B the business services it's scraping run on
+# the HOST via `mvn spring-boot:run`, not as sibling containers on this
+# compose network — there is no compose-service-name DNS entry for any of them
+# to resolve, exactly the gap Milestone 9's own comment in prometheus.yml
+# flagged as "no longer relevant" after switching away from this very
+# approach, without noticing Option B still needed it. host.docker.internal is
+# the container's view of the host machine itself; see
+# docker-compose.override.ide.yml for the extra_hosts entry Linux's Docker
+# Engine needs to resolve it (Docker Desktop on Mac/Windows already does, out
+# of the box).
+#
+# Use this file instead of prometheus.yml by running Option B's infra command
+# with the override compose file layered on top (see README, "Option B"):
+#   docker compose -f docker-compose.yml -f docker-compose.override.ide.yml \
+#     up -d zipkin postgres prometheus grafana
+scrape_configs:
+  - job_name: spendwise-services
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["host.docker.internal:8080"]
+        labels:
+          service: api-gateway
+      - targets: ["host.docker.internal:8081"]
+        labels:
+          service: auth-service
+      - targets: ["host.docker.internal:8082"]
+        labels:
+          service: user-service
+      - targets: ["host.docker.internal:8083"]
+        labels:
+          service: transaction-service
+      - targets: ["host.docker.internal:8084"]
+        labels:
+          service: budget-service
+      - targets: ["host.docker.internal:8085"]
+        labels:
+          service: notification-service
+      - targets: ["host.docker.internal:8086"]
+        labels:
+          service: analytics-service
+
+  - job_name: spendwise-config-server
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["host.docker.internal:8888"]
+        labels:
+          service: config-server
+
+  - job_name: spendwise-discovery-server
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["host.docker.internal:8761"]
+        labels:
+          service: discovery-server

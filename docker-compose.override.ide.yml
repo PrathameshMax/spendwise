@@ -1,0 +1,20 @@
+# Milestone 13 fix — layer this on top of docker-compose.yml when running
+# README's "Option B" (services via IDE/Maven, infra via Docker Compose):
+#
+#   docker compose -f docker-compose.yml -f docker-compose.override.ide.yml \
+#     up -d zipkin postgres prometheus grafana
+#
+# Only prometheus needs anything different in this mode: it must scrape the
+# HOST machine (where `mvn spring-boot:run` processes listen) instead of
+# sibling containers on this compose network, which don't exist in Option B.
+# extra_hosts' host-gateway mapping is the piece Linux's Docker Engine needs
+# for host.docker.internal to resolve at all — Docker Desktop (Mac/Windows)
+# already provides it without this, but the mapping is a harmless no-op there
+# too, so one override file works on every platform.
+services:
+  prometheus:
+    volumes:
+      - ./infra/prometheus/prometheus-ide.yml:/etc/prometheus/prometheus.yml
+      - ./infra/prometheus/alerts.yml:/etc/prometheus/alerts.yml
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

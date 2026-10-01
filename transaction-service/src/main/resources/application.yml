@@ -56,3 +56,40 @@ resilience4j:
         # method itself (see its Javadoc).
         ignore-exceptions:
           - feign.FeignException$NotFound
+  bulkhead:
+    thread-pool-instances:
+      # Milestone 13 — scoped here, not config-repo/application.yml: unlike
+      # Retry/CircuitBreaker's userServiceLookup (an internal, Eureka-resolved
+      # sibling call every business service could plausibly make), this
+      # protects one specific external third-party integration that only
+      # transaction-service has, exactly the same "service-local, not a
+      # platform default" reasoning Milestone 12 already applied to this same
+      # file's circuitbreaker block above.
+      exchangeRateLookup:
+        # A small, intentionally modest pool: this call is not expected to be
+        # hot-path/high-volume (most transactions are presumably in the
+        # user's own base currency and skip it via convertIfNeeded's
+        # short-circuit), so sizing it generously would just reserve threads
+        # that mostly sit idle. core vs max lets it burst briefly under
+        # genuine concurrent load before queuing; queue-capacity bounds how
+        # many callers wait rather than fail fast once the pool itself is
+        # saturated — past that, BulkheadFullException routes straight to
+        # the fallback (Q48).
+        core-thread-pool-size: 5
+        max-thread-pool-size: 10
+        queue-capacity: 20
+        keep-alive-duration: 20ms
+
+# Milestone 13 — externalized rather than hardcoded in ExchangeRateWebClientConfig,
+# the same pattern every other per-service, non-shared setting in this file
+# follows (DB_HOST, server.port, ...): free, keyless public API (see
+# ExchangeRateApiResponse's Javadoc for the one caveat on its exact response
+# shape). connect/read timeouts mirror Milestone 11's OpenFeign defaults
+# (config-repo/application.yml) — the same "fail fast against a dependency
+# that could just be slow" reasoning applies equally to a third party as to a
+# sibling service.
+spendwise:
+  exchange-rate:
+    base-url: https://open.er-api.com
+    connect-timeout-ms: 2000
+    read-timeout-ms: 1500

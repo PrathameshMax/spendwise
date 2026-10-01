@@ -14,6 +14,8 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
+import java.util.List;
+
 /**
  * Shared RFC 7807 ProblemDetail mapping for every servlet-based service
  * (Milestone 7) — replaces the ad-hoc "let it surface as a generic 500"
@@ -35,14 +37,19 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
  * nothing ever reaches a client as a bare, undocumented 500.
  *
  * {@link #handleMethodArgumentNotValid} narrows that inherited handling
- * (Milestone 8): the base class already turns a failed {@code @Valid}/
- * {@code @Validated} request body into a ProblemDetail with a 400 status and a
- * per-field {@code errors} array, but it has no way to know about this
- * platform's own {@code errorCode}/{@code correlationId} response contract.
- * Without this override, a validation failure would be the one error path on
- * the whole platform whose response shape doesn't match every other error —
- * this closes that gap by enriching the same ProblemDetail the base class
- * already built rather than replacing it.
+ * (Milestone 8, corrected in Milestone 13): the base class turns a failed
+ * {@code @Valid}/{@code @Validated} request body into a ProblemDetail with a
+ * 400 status, but — contrary to what this Javadoc originally claimed — its
+ * {@code detail} message is just the generic "Invalid request content.";
+ * Spring does <b>not</b> put a per-field breakdown on the body itself, only
+ * inside {@link MethodArgumentNotValidException#getBindingResult()}, which
+ * never reaches the client unless something extracts it. A caller fixing a
+ * four-field request one 400-and-retry at a time (caught validating Milestone
+ * 12's own request bodies) is exactly the friction every other RFC 7807
+ * response on this platform was supposed to avoid. This override now does
+ * two things: enrich with this platform's {@code errorCode}/
+ * {@code correlationId} contract (as before), and add the per-field
+ * {@code errors} array (field + message) the base class never provided.
  */
 public abstract class AbstractGlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
@@ -50,6 +57,7 @@ public abstract class AbstractGlobalExceptionHandler extends ResponseEntityExcep
 
     private static final String ERROR_CODE_PROPERTY = "errorCode";
     private static final String CORRELATION_ID_PROPERTY = "correlationId";
+    private static final String FIELD_ERRORS_PROPERTY = "errors";
     private static final String GENERIC_ERROR_CODE = "INTERNAL_SERVER_ERROR";
     private static final String VALIDATION_ERROR_CODE = "VALIDATION_FAILED";
 
@@ -75,6 +83,10 @@ public abstract class AbstractGlobalExceptionHandler extends ResponseEntityExcep
         ResponseEntity<Object> response = super.handleMethodArgumentNotValid(ex, headers, status, request);
         if (response.getBody() instanceof ProblemDetail problem) {
             enrich(problem, VALIDATION_ERROR_CODE);
+            List<FieldValidationError> errors = ex.getBindingResult().getFieldErrors().stream()
+                    .map(fieldError -> new FieldValidationError(fieldError.getField(), fieldError.getDefaultMessage()))
+                    .toList();
+            problem.setProperty(FIELD_ERRORS_PROPERTY, errors);
         }
         return response;
     }

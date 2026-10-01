@@ -22,7 +22,16 @@ COPY . .
 # daemon of its own to run the Testcontainers-backed integration tests this
 # service ships (CredentialRepositoryIT), and test execution belongs to a CI
 # pipeline stage, not an image build.
-RUN mvn -B -pl auth-service -am -DskipTests clean package
+#
+# --mount=type=cache,target=/root/.m2 (Milestone 13 fix) — a BuildKit cache
+# mount persists Maven's local repository BETWEEN builds, in a cache layer
+# that lives outside the image itself (never baked into a COPY'd layer, so it
+# can't bloat the runtime image this stage is discarded from anyway). Before
+# this, every rebuild re-resolved the entire dependency tree from scratch
+# inside the ephemeral build-stage filesystem, repeatedly filling the host's
+# disk during active development (`docker compose up -d --build <service>`
+# after every code change) until Docker itself ran out of space and crashed.
+RUN --mount=type=cache,target=/root/.m2 mvn -B -pl auth-service -am -DskipTests clean package
 
 # STAGE 2 — runtime. Eclipse Temurin's own -jre-alpine variant: no javac, no
 # Maven, no source, no dependency cache — just the JRE needed to run an
@@ -46,7 +55,21 @@ WORKDIR /app
 # has something to react to.
 ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError"
 
+# Non-root execution (Milestone 13 fix) — every image up to this point ran its
+# application process as root (the default for a FROM image with no USER set)
+# purely by omission, not by design: a container escape or a deserialization-
+# style RCE in the JVM process would hand an attacker root inside the
+# container for no reason this platform actually needs. Alpine's busybox
+# addgroup/adduser -S flag creates a SYSTEM group/user (no password, no home
+# directory, no login shell) — exactly the shape a process-only account needs.
+# chown then USER must come after the jar is COPY'd in (chown has nothing to
+# act on before that) and before ENTRYPOINT (USER is sticky for every
+# instruction after it, including the final CMD/ENTRYPOINT process itself).
+RUN addgroup -S spendwise && adduser -S -G spendwise spendwise
+
 COPY --from=build /workspace/auth-service/target/*.jar app.jar
+RUN chown spendwise:spendwise app.jar
+USER spendwise
 
 EXPOSE 8081
 

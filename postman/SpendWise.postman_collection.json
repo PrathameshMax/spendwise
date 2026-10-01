@@ -1444,7 +1444,7 @@
                 "description": "",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"userId\": \"{{userId}}\",\n  \"categoryId\": \"{{categoryId}}\",\n  \"amount\": 12000.0,\n  \"type\": \"EXPENSE\",\n  \"description\": \"Noise-cancelling headphones\",\n  \"transactionDate\": \"2026-09-10\"\n}"
+                  "raw": "{\n  \"userId\": \"{{userId}}\",\n  \"categoryId\": \"{{categoryId}}\",\n  \"amount\": 12000.0,\n  \"type\": \"EXPENSE\",\n  \"description\": \"Noise-cancelling headphones\",\n  \"transactionDate\": \"2026-09-10\",\n  \"currency\": \"INR\"\n}"
                 }
               },
               "response": []

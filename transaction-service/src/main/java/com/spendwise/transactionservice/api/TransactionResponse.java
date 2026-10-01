@@ -16,5 +16,7 @@ public record TransactionResponse(
         TransactionType type,
         String description,
         LocalDate transactionDate,
-        Instant createdAt) {
+        Instant createdAt,
+        String currency,
+        BigDecimal baseCurrencyAmount) {
 }

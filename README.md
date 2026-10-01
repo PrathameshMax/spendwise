@@ -96,7 +96,15 @@ mvn -pl user-service spring-boot:run
 ```
 
 ```bash
-docker compose up -d zipkin postgres prometheus grafana
+# Milestone 13 fix — plain `docker compose up -d zipkin postgres prometheus
+# grafana` starts Prometheus with prometheus.yml, whose targets are compose
+# service names (api-gateway:8080, etc.) that don't exist on this network in
+# Option B, since the services themselves are running on the host, not as
+# containers — every target would show DOWN. Layer the IDE override on top so
+# Prometheus gets host.docker.internal targets instead (see
+# docker-compose.override.ide.yml and infra/prometheus/prometheus-ide.yml):
+docker compose -f docker-compose.yml -f docker-compose.override.ide.yml \
+  up -d zipkin postgres prometheus grafana
 ```
 
 As of Milestone 6, `api-gateway` (port 8080) is the intended entry point for every
@@ -125,8 +133,12 @@ against either option above.
 `spring.config.import=configserver:http://localhost:8888` instead of bundling
 per-profile YAML locally. `/actuator/refresh` is exposed on every service for
 single-instance config refresh; the Spring Cloud Bus broadcast (fleet-wide refresh)
-is deferred until Milestone 13, where it rides on the same Kafka cluster instead of
-standing up a separate broker just for this.
+is deferred until Kafka exists on the platform (Milestone 17) rather than standing
+up a separate broker just for this. (Correction: this note originally pointed to
+"Milestone 13" from an earlier, pre-v2 roadmap numbering — v2's actual Milestone 13
+is Resilience4j's Bulkhead/TimeLimiter, with no Kafka involved; left uncorrected
+until Milestone 13 itself actually shipped and made the stale forward-reference
+obvious.)
 
 **Milestone 3 (Phase 1) complete** — Distributed Request Tracing. `auth-service`,
 `user-service`, `transaction-service`, `budget-service`, and `analytics-service` each
@@ -566,13 +578,17 @@ not a partial failure (Q47).
 1. In `user-service`'s `UserController.getById`, temporarily replace the
    method body with `throw new RuntimeException("Simulated failure");` and
    rebuild: `docker compose up -d --build user-service`.
-2. Fire a burst of concurrent requests at transaction-service through the
-   gateway — at least 5-10, to clear `minimum-number-of-calls`:
+2. Fire a burst of concurrent, *authenticated* requests at transaction-service
+   through the gateway — at least 5-10, to clear `minimum-number-of-calls`
+   (api-gateway requires a JWT since Milestone 6; `source scripts/smoke-env.sh`
+   first for `$GW`/`$AUTH`/`$USER_ID`/`$CATEGORY_ID` — a corrected version of
+   an earlier copy of this exact command, which was missing `$AUTH` entirely):
    ```bash
+   source scripts/smoke-env.sh
    for i in {1..15}; do
-     curl -s -o /dev/null -w "%{http_code}\n" -X POST http://localhost:8080/api/v1/transactions \
-       -H "Content-Type: application/json" \
-       -d "{\"userId\":\"<existing-id>\",\"categoryId\":\"<existing-id>\",\"amount\":5,\"type\":\"EXPENSE\",\"description\":\"chaos\",\"transactionDate\":\"2026-10-01\"}"
+     curl -s -o /dev/null -w "%{http_code}\n" -X POST $GW/api/v1/transactions \
+       -H "$AUTH" -H "Content-Type: application/json" \
+       -d "{\"userId\":\"$USER_ID\",\"categoryId\":\"$CATEGORY_ID\",\"amount\":5,\"type\":\"EXPENSE\",\"description\":\"chaos\",\"transactionDate\":\"2026-10-01\",\"currency\":\"INR\"}"
    done
    ```
 3. Watch `docker compose logs transaction-service --since 2m | grep -i "CircuitBreaker\|fell back"` — you'll see the circuit breaker's own state-transition log line (`CLOSED` → `OPEN`) around the point `failure-rate-threshold` is crossed, followed by `userServiceLookup` logging the fallback firing.
@@ -580,7 +596,275 @@ not a partial failure (Q47).
 5. Stop sending traffic, wait past `wait-duration-in-open-state` (10s), then send one more request — the circuit moves to `HALF_OPEN` and lets it through as a trial call.
 6. Revert `UserController.getById` and rebuild user-service again before moving on.
 
-Next: Milestone 13 — The Full Resilience4j Suite (Bulkhead & TimeLimiter).
+**Milestone 13 (Phase 2) complete** — The Full Resilience4j Suite (Bulkhead &
+TimeLimiter). Also folds in every fix noted while validating Milestone 12, per
+the standing rule that a fix found during validation ships in the next
+milestone rather than waiting indefinitely: Spring Cloud LoadBalancer's own
+retry layer disabled (it was silently multiplying Resilience4j's `@Retry`
+attempts), field-level validation errors on every 400, a `ClockProvider` fix
+for `@PastOrPresent` rejecting a legitimate "today" from timezones ahead of
+UTC, the API Gateway's duplicate `X-Correlation-ID` response header actually
+fixed in code this time, a BuildKit Maven cache mount and non-root `USER` in
+every Dockerfile, and an IDE-mode Prometheus config for Option B. Each is
+documented at its own change, not repeated here.
+
+The roadmap's own two new modules needed something real to protect, which
+exposed a gap: `transaction-service` had no multi-currency logic at all, even
+though both locked roadmaps already committed to it (Functional Roadmap,
+Transaction Service responsibility #5, and Workflow 1 Step 2 — "converts it
+via a resilient WebClient call to the external exchange-rate API"). Rather
+than silently inventing scope or silently skipping the literal "exchange-rate-
+API call" the roadmap names, this was raised explicitly before building
+anything (see the session's own record) — building the real feature was the
+chosen path, scoped tightly to what the Bulkhead/TimeLimiter exercise actually
+needs rather than a fully-general currency-aware ledger: `currency` is now a
+required field on every transaction, and converting it to the user's own
+`preferredCurrency` (fetched from `user-service`, extending the already-
+minimal `UserExistenceResponse`) populates a new, separate
+`baseCurrencyAmount` column — the originally-entered amount and currency are
+never overwritten, only accompanied.
+
+Two independent resilience additions, deliberately NOT both applied to the
+same call, matching exactly how the roadmap phrases them:
+
+- **`ThreadPoolBulkhead` on the exchange-rate call** (`ExchangeRateClient`,
+  new). This is the platform's first genuine third-party integration — a real
+  external host with no Eureka registration, called over a blocking
+  `WebClient` (this service is Spring MVC/Tomcat throughout; making one call
+  reactive while `TransactionService.create` stays a synchronous
+  `@Transactional` method buys nothing). `type = THREADPOOL` is what actually
+  earns the roadmap's own framing ("so a slow third party can never starve
+  the pool that serves internal calls"): Resilience4j submits the ENTIRE
+  annotated method to a small, separately-sized pool
+  (`resilience4j.bulkhead.thread-pool-instances.exchangeRateLookup`,
+  transaction-service's own `application.yml` — service-local, same reasoning
+  Milestone 12 already applied to its `CircuitBreaker` config), so a hanging
+  exchange-rate API can only ever exhaust that small pool, never Tomcat's own.
+- **`TimeLimiter` on an async, `CompletableFuture`-based wrapper around the
+  user-service Feign call** (`AsyncUserServiceLookup`, new). Spring Cloud
+  OpenFeign is purely synchronous by design (confirmed against
+  [resilience4j/resilience4j#1111](https://github.com/resilience4j/resilience4j/issues/1111)
+  and [Spring Cloud OpenFeign's own reference docs](https://docs.spring.io/spring-cloud-openfeign/docs/current/reference/html/),
+  which explicitly defers reactive/async support to the separate
+  `feign-reactive` project) — `@TimeLimiter` directly on a `@FeignClient`
+  method fails at runtime with "Return type not supported." The fix is a
+  second bean wrapping the existing, unmodified `UserServiceClient.getById`
+  (still carrying its own `@Retry`+`@CircuitBreaker`) in
+  `CompletableFuture.supplyAsync` on a dedicated, hand-sized executor (not the
+  shared `ForkJoinPool` common pool — a slow lookup competing there would
+  starve unrelated async work in the same JVM), with `@TimeLimiter` applied to
+  that wrapper method instead.
+
+**Decorator stacking order, verified, not assumed.** Milestone 12's Javadoc
+already established that `@Retry` wraps `@CircuitBreaker` (Retry outer,
+CircuitBreaker inner) from hands-on debugging. Adding two more decorators
+needed the complete picture confirmed against
+[Resilience4j's own documentation](https://resilience4j.readme.io/v1.5.0/docs/getting-started-3)
+rather than assumed from the roadmap blurb's own prose ordering (which lists
+"Bulkhead → TimeLimiter," not quite Resilience4j's actual default): the real,
+documented default is
+
+```
+Retry ( CircuitBreaker ( RateLimiter ( TimeLimiter ( Bulkhead ( Function ) ) ) ) )
+```
+
+— Retry outermost, Bulkhead innermost. This platform uses no `@RateLimiter`
+yet (Milestone 14 introduces rate limiting, at the Gateway rather than via
+this annotation), so the effective chain on `UserServiceClient.getById` itself
+is `Retry → CircuitBreaker` (unchanged since Milestone 12), with `TimeLimiter`
+now wrapping the whole thing one level further out, in `AsyncUserServiceLookup`
+— every retry attempt, and the circuit's own accept/reject decision, happens
+*inside* the time-limited window, not each individually re-timed. `Bulkhead`
+on `ExchangeRateClient` is architecturally independent — a completely
+separate call with no Retry or CircuitBreaker of its own — so no stacking
+order question even arises there; Q49 below goes through why the order
+matters when it does.
+
+**Q48: What is a Bulkhead, and how is it different from a Circuit Breaker?**
+A Bulkhead limits *concurrency* into a protected call — at most N calls (or
+threads, for `ThreadPoolBulkhead`) run at once, with anything beyond that
+either queued (up to a bound) or rejected outright with
+`BulkheadFullException`. A Circuit Breaker tracks *failure rate* over a
+sliding window of *completed* calls and, once a threshold is crossed, stops
+attempting the call at all for a while (OPEN), regardless of how much spare
+concurrency exists. They solve different failure modes and compose rather
+than substitute for each other: a Circuit Breaker alone doesn't stop ten
+concurrent slow-but-not-yet-failing calls from each holding a thread; a
+Bulkhead alone doesn't stop a downstream that's failing fast (and therefore
+never saturating the bulkhead) from being hammered with doomed retries. This
+platform's `ThreadPoolBulkhead` specifically isolates *which thread pool* pays
+for a slow call (the whole point of `type = THREADPOOL` over the lighter-
+weight `SEMAPHORE` type, which limits concurrency without moving execution to
+a separate pool) — a Circuit Breaker never touches thread-pool isolation at
+all, only the decision to keep calling or not.
+
+**Q49: In what order do Resilience4j decorators execute when stacked, and
+why does the order matter?** Per Resilience4j's own documented default:
+`Retry(CircuitBreaker(RateLimiter(TimeLimiter(Bulkhead(call)))))` — Retry
+outermost, Bulkhead innermost (configurable per-aspect via
+`resilience4j.<type>.<typeName>AspectOrder` properties, not by reordering the
+annotations textually on the method, which has no effect on execution order).
+The order matters because each layer changes what the layer *outside* it
+actually measures or repeats: `fallbackMethod` must sit on the OUTERMOST
+annotation actually declared, or it fires after every single inner attempt
+instead of once after the whole chain gives up (Milestone 12's own fix).
+Retry being outermost means each retry attempt gets its own fresh pass
+through CircuitBreaker — a circuit that's already OPEN rejects every retry
+attempt instantly via `CallNotPermittedException` rather than letting them
+exhaust their backoff delays uselessly. TimeLimiter sitting outside Bulkhead
+(and, in this platform's composed case, outside Retry+CircuitBreaker too,
+via `AsyncUserServiceLookup`) means the timeout bounds the *whole* protected
+operation — every retry, every circuit check — not just one raw attempt;
+placed the other way around, a tight per-attempt timeout could fire before
+Retry even got to try its second attempt, silently neutering Retry. Bulkhead
+innermost means it is the last gate before the actual call, measuring only
+genuine concurrent *in-flight* work, not retry/circuit-breaker bookkeeping
+overhead.
+
+**Q50: How does a TimeLimiter interact with an already-configured
+connect/read timeout?** They bound different things and both still apply —
+TimeLimiter doesn't replace or override a lower-level HTTP timeout, it adds an
+outer ceiling on top of it. `UserServiceClient`'s `connect-timeout`/
+`read-timeout` (Milestone 11) bound a single HTTP attempt at the OpenFeign/
+HTTP-client layer; `AsyncUserServiceLookup`'s `@TimeLimiter` bounds the total
+wall-clock time of the `CompletableFuture` it wraps — which, in this
+composition, is the entire Retry-driven sequence of up to 3 attempts, each
+individually bounded by that same read-timeout, plus backoff waits between
+them. Sized wrong relative to each other, the two fight: a TimeLimiter timeout
+shorter than one attempt's own read-timeout would fire before that attempt
+could even time out on its own terms, discarding Retry's remaining attempts
+outright (`cancel-running-future: true` makes this explicit — it doesn't just
+stop *waiting*, it cancels the in-flight future); sized with headroom above
+the natural worst case of the inner chain (this platform's `7s` against an
+observed ~5s worst case for 3 Retry attempts), it instead behaves purely as a
+backstop — the inner timeouts are what actually fire in the overwhelming
+majority of failures, and the outer TimeLimiter only matters if something
+about the inner chain's own timing assumptions turns out to be wrong in
+production (a backoff multiplier that's drifted, a jitter factor that's
+unexpectedly large, a CircuitBreaker still letting attempts through close to
+its own threshold) — exactly the kind of defense-in-depth a connect/read
+timeout alone can't provide, since it has no concept of "the whole operation,"
+only "this one attempt."
+
+🔥 **Chaos Lab — try it yourself:**
+
+*Bulkhead exhaustion (`ExchangeRateClient`):*
+1. Temporarily lower `exchangeRateLookup`'s pool in
+   `transaction-service/src/main/resources/application.yml` to something a
+   handful of concurrent requests can actually saturate —
+   `core-thread-pool-size: 1`, `max-thread-pool-size: 1`, `queue-capacity: 1`
+   — and rebuild: `docker compose up -d --build transaction-service`.
+2. `source scripts/smoke-env.sh`, then fire several concurrent transactions
+   whose `currency` differs from the test user's `preferredCurrency` (check
+   it first: `curl -s $GW/api/v1/users/$USER_ID -H "$AUTH" | jq .preferredCurrency`
+   — use anything else, e.g. `"USD"` if that returns `"INR"`):
+   ```bash
+   for i in {1..6}; do
+     curl -s -o /dev/null -w "%{http_code}\n" -X POST $GW/api/v1/transactions \
+       -H "$AUTH" -H "Content-Type: application/json" \
+       -d "{\"userId\":\"$USER_ID\",\"categoryId\":\"$CATEGORY_ID\",\"amount\":5,\"type\":\"EXPENSE\",\"description\":\"bulkhead-chaos\",\"transactionDate\":\"2026-10-01\",\"currency\":\"USD\"}" &
+   done
+   wait
+   ```
+3. With the pool capped at 1 thread + 1 queue slot, several of the six
+   concurrent calls should return `503` (`errorCode: DOWNSTREAM_SERVICE_UNAVAILABLE`)
+   almost immediately — `BulkheadFullException` rejecting outright rather than
+   waiting — while at most two succeed (one running, one queued).
+   `docker compose logs transaction-service --since 2m | grep -i "exchange-rate lookup fell back"`
+   shows the fallback firing for the rejected calls.
+4. Revert the pool sizes (`5`/`10`/`20`) and rebuild before moving on.
+
+*TimeLimiter timeout (`AsyncUserServiceLookup`):*
+1. In `user-service`'s `UserController.getById`, temporarily add
+   `Thread.sleep(8000);` at the top of the method body (longer than both the
+   1.5s read-timeout per attempt AND the 7s outer `TimeLimiter`) and rebuild:
+   `docker compose up -d --build user-service`.
+2. Send one authenticated transaction request (any currency) through the
+   gateway and time it:
+   ```bash
+   source scripts/smoke-env.sh
+   time curl -s -o /dev/null -w "%{http_code}\n" -X POST $GW/api/v1/transactions \
+     -H "$AUTH" -H "Content-Type: application/json" \
+     -d "{\"userId\":\"$USER_ID\",\"categoryId\":\"$CATEGORY_ID\",\"amount\":5,\"type\":\"EXPENSE\",\"description\":\"timelimiter-chaos\",\"transactionDate\":\"2026-10-01\",\"currency\":\"INR\"}"
+   ```
+3. Expect `503` at just over **7s**, not ~5s (Retry's own 3-attempt worst case
+   — each attempt now always "succeeds" from the HTTP client's point of view
+   right up until the artificial 8s sleep would eventually respond, so Retry
+   has nothing to retry on; without `@TimeLimiter`, this request would instead
+   hang for the full 8s+ per attempt, up to 24s+ across 3 retries) and well
+   under what an unbounded wait would take. `docker compose logs
+   transaction-service --since 2m | grep -i "async user-service lookup fell back"`
+   shows the `TimeoutException` the fallback converted.
+4. Revert the `Thread.sleep(8000)` line and rebuild user-service before
+   moving on.
+
+### Validating Milestone 13
+
+1. **Structural checks** — `xmllint --noout` on every `pom.xml`; parse every
+   touched YAML (`config-repo/application.yml`, `transaction-service/
+   application.yml`, `api-gateway.yml`, both Prometheus files,
+   `docker-compose.override.ide.yml`) with PyYAML; `docker compose -f
+   docker-compose.yml -f docker-compose.override.ide.yml config -q`; `javac`
+   syntax-only pass on every new/changed `.java` file (this sandbox has no
+   Maven Central access, so a full `mvn compile` isn't possible here — only
+   missing-symbol errors from the absent classpath are expected, zero syntax
+   errors).
+2. **Rebuild and bring the stack up**:
+   ```bash
+   docker compose up -d --build transaction-service user-service api-gateway
+   ```
+   (`user-service` only needs rebuilding if you ran the Chaos Lab steps above
+   and are now reverting them.)
+3. **Confirm the happy path still works** and now carries the new fields:
+   ```bash
+   source scripts/smoke-env.sh
+   curl -s -X POST $GW/api/v1/transactions \
+     -H "$AUTH" -H "Content-Type: application/json" \
+     -d "{\"userId\":\"$USER_ID\",\"categoryId\":\"$CATEGORY_ID\",\"amount\":100,\"type\":\"EXPENSE\",\"description\":\"m13-happy-path\",\"transactionDate\":\"2026-10-01\",\"currency\":\"INR\"}" | jq .
+   ```
+   Expect `201` with the response now including `"currency":"INR"` and
+   `"baseCurrencyAmount":null` (same-currency — nothing to convert).
+4. **Confirm actual currency conversion** — repeat step 3 with a `currency`
+   different from the test user's `preferredCurrency` (checked via `GET
+   /api/v1/users/{id}`). Expect `201` with `baseCurrencyAmount` populated and
+   non-null; a Prometheus check confirms the bulkhead was actually exercised:
+   ```bash
+   curl -s $GW/actuator/prometheus 2>/dev/null; \
+   curl -s http://localhost:8083/actuator/prometheus | grep -i 'resilience4j_bulkhead.*exchangeRateLookup'
+   ```
+   (run directly against transaction-service's own port — the Gateway has no
+   business route to its Actuator — look for
+   `resilience4j_bulkhead_available_concurrent_calls` and
+   `resilience4j_bulkhead_max_allowed_concurrent_calls` for `exchangeRateLookup`.)
+5. **Confirm the two Chaos Lab scenarios above** (Bulkhead exhaustion,
+   TimeLimiter timeout) — both are written as pass/fail checks with an
+   expected status code and an expected rough timing, not just "observe the
+   logs."
+6. **Confirm the folded-in pending fixes**, each independently:
+   - *LoadBalancer retry disabled*: re-run the TimeLimiter Chaos Lab above and
+     confirm the `503` lands at just over 7s (the TimeLimiter ceiling), not
+     14-20s+ (which would indicate LoadBalancer is still silently multiplying
+     attempts underneath Resilience4j's own 3).
+   - *Field-level validation errors*: send a deliberately invalid request
+     (e.g. omit `currency` and send a negative `amount`) and confirm the `400`
+     body's `errors` array lists both fields with their own messages, not just
+     a generic `"Invalid request content."` detail string.
+   - *UTC/IST `@PastOrPresent` fix*: if testing between roughly 00:00-05:30
+     IST, submit `transactionDate` as today's date in IST and confirm `201`,
+     not a `400` — this was the exact window the bug fired in before the fix.
+   - *Duplicate `X-Correlation-ID`*: `curl -i` any endpoint through the
+     gateway and confirm exactly one `X-Correlation-ID` header line in the
+     response, not two.
+   - *Dockerfiles*: `docker exec spendwise-transaction-service whoami` should
+     print `spendwise`, not `root`; a second `docker compose up -d --build
+     transaction-service` after no source changes should finish noticeably
+     faster than the first (cache mount hit).
+   - *Prometheus IDE-mode*: with the Option B compose override running, open
+     `http://localhost:9090/targets` and confirm the `spendwise-services` job's
+     targets resolve (not necessarily all UP, depending on which services you
+     actually have running on the host at the time).
+
+Next: Milestone 14 — Edge Throttling (Redis Token Bucket Rate Limiting).
 
 ## API Versioning & Deprecation Policy
 

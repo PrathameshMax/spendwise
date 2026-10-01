@@ -10,7 +10,10 @@ scrape_configs:
   # docker-compose network, so Prometheus reaches them by compose service name
   # (Docker's embedded DNS resolves it to the container's IP) instead of the
   # host.docker.internal indirection Milestones 3-5 needed for services still
-  # running on the host via `mvn spring-boot:run`.
+  # running on the host via `mvn spring-boot:run`. This is the config for
+  # Option A (docker compose up -d) only — Option B (services on the host)
+  # still needs that host.docker.internal indirection, now covered by the
+  # sibling prometheus-ide.yml (Milestone 13 fix) rather than being dropped.
   - job_name: spendwise-services
     metrics_path: /actuator/prometheus
     static_configs:
