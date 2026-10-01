@@ -55,6 +55,48 @@ spring:
     # instead, keeping the error format consistent platform-wide with no custom code.
     problemdetails:
       enabled: true
+  data:
+    redis:
+      # Milestone 14 — same ${VAR:localhost} pattern every other per-service
+      # backend host has used since Milestone 4's DB_HOST default: the
+      # Gateway reaches Redis unchanged when it runs on the host via `mvn
+      # spring-boot:run`, while docker-compose.yml overrides REDIS_HOST to
+      # the redis container's own compose service name once this runs
+      # containerized — exactly like every *_SERVICE_HOST override above.
+      host: ${REDIS_HOST:localhost}
+      port: 6379
+      # Explicit, same "never trust an external dependency without a bound"
+      # reasoning as every other I/O timeout in this platform (Milestone
+      # 11's Feign defaults, Milestone 13's exchange-rate WebClient): a
+      # degraded (not cleanly down) Redis leaves the rate limiter's Lua
+      # script round trip with nothing bounding its own latency, so a
+      # struggling Redis queues every gated request behind it instead of
+      # either allowing or denying them promptly — a real, reported failure
+      # mode (spring-cloud/spring-cloud-gateway#3373), not a hypothetical one.
+      timeout: 1000ms
+  cloud:
+    gateway:
+      default-filters:
+        # Milestone 14 — registered as a default-filter, not scoped to one
+        # route, so every route gets the same protection ("drop brute-force
+        # or malicious bursts before they reach any core service" — not just
+        # auth-service's). redis-rate-limiter.* are the exact property names
+        # Spring Cloud Gateway's own RedisRateLimiter exposes for its Token
+        # Bucket Algorithm implementation (Q51/Q52): replenishRate is tokens
+        # refilled per second, burstCapacity is the bucket's ceiling,
+        # requestedTokens is the cost of one request. 10/20 mirror Spring's
+        # own documented example values — generous enough that no legitimate
+        # user session trips it, tight enough to reproduce in the README's
+        # Chaos Lab within a few seconds of looped requests. key-resolver
+        # points at RateLimitConfig#remoteAddressKeyResolver — see its
+        # Javadoc for why this is keyed by client IP, not the authenticated
+        # principal.
+        - name: RequestRateLimiter
+          args:
+            redis-rate-limiter.replenishRate: 10
+            redis-rate-limiter.burstCapacity: 20
+            redis-rate-limiter.requestedTokens: 1
+            key-resolver: "#{@remoteAddressKeyResolver}"
   # Milestone 13 fix — DedupeResponseHeader=X-Correlation-ID, RETAIN_FIRST used
   # to live here as a default-filter, but live testing kept showing the header
   # duplicated anyway: this filter's dedup logic runs in its own post-phase,

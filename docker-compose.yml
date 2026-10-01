@@ -45,6 +45,24 @@ services:
       timeout: 5s
       retries: 10
 
+  # Milestone 14 — backs api-gateway's RedisRateLimiter (config-repo/api-gateway.yml).
+  # No password/persistence volume: this instance holds nothing but short-lived
+  # token-bucket counters the Lua script underlying RedisRateLimiter maintains,
+  # which are fine to lose on a restart, unlike postgres's durable application data.
+  redis:
+    image: redis:7-alpine
+    container_name: spendwise-redis
+    ports:
+      - "6379:6379"
+    # Same role as postgres's pg_isready above: api-gateway's `depends_on:
+    # condition: service_healthy` needs a real readiness probe, and redis-cli
+    # ping against the server redis itself ships is that probe, not a custom one.
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   prometheus:
     image: prom/prometheus:latest
     container_name: spendwise-prometheus
@@ -298,6 +316,11 @@ services:
       BUDGET_SERVICE_HOST: budget-service
       NOTIFICATION_SERVICE_HOST: notification-service
       ANALYTICS_SERVICE_HOST: analytics-service
+      # Milestone 14 — overrides config-repo/api-gateway.yml's `localhost`
+      # default with the redis container's own compose service name, the
+      # exact same override pattern every *_SERVICE_HOST entry above already
+      # follows for api-gateway's downstream HTTP dependencies.
+      REDIS_HOST: redis
     depends_on:
       config-server:
         condition: service_healthy
@@ -308,6 +331,8 @@ services:
       transaction-service:
         condition: service_healthy
       budget-service:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:

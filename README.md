@@ -102,9 +102,15 @@ mvn -pl user-service spring-boot:run
 # Option B, since the services themselves are running on the host, not as
 # containers — every target would show DOWN. Layer the IDE override on top so
 # Prometheus gets host.docker.internal targets instead (see
-# docker-compose.override.ide.yml and infra/prometheus/prometheus-ide.yml):
+# docker-compose.override.ide.yml and infra/prometheus/prometheus-ide.yml).
+# Milestone 14 adds `redis` to this list: api-gateway's RedisRateLimiter needs
+# it reachable regardless of which option starts the services themselves, and
+# unlike Prometheus's scrape targets, redis needs no IDE-specific override —
+# its container already publishes 6379 to the host, so api-gateway's own
+# ${REDIS_HOST:localhost} default (config-repo/api-gateway.yml) reaches it
+# unchanged, exactly like postgres's DB_HOST default already does.
 docker compose -f docker-compose.yml -f docker-compose.override.ide.yml \
-  up -d zipkin postgres prometheus grafana
+  up -d zipkin postgres redis prometheus grafana
 ```
 
 As of Milestone 6, `api-gateway` (port 8080) is the intended entry point for every
@@ -864,7 +870,166 @@ only "this one attempt."
      targets resolve (not necessarily all UP, depending on which services you
      actually have running on the host at the time).
 
-Next: Milestone 14 — Edge Throttling (Redis Token Bucket Rate Limiting).
+**Milestone 14 complete** — Edge Throttling (Redis Token Bucket Rate
+Limiting). No fixes were raised validating Milestone 13, so nothing folds in
+here beyond this milestone's own scope.
+
+Scoped exactly to the roadmap's two sentences: spin up Redis, and configure a
+Redis-backed token-bucket filter directly inside api-gateway so a burst never
+reaches any core service. No per-user tiers, no multiple rate-limit zones, no
+IP allowlist — none of that is in the roadmap text, so none of it is here.
+
+Rather than hand-write a Lua-script-based limiter, this uses Spring Cloud
+Gateway's own built-in `RedisRateLimiter` (confirmed against its
+[reference documentation](https://docs.spring.io/spring-cloud-gateway/reference/spring-cloud-gateway/gatewayfilter-factories/requestratelimiter-factory.html)
+to actually implement the Token Bucket Algorithm the roadmap names, not
+assumed): adding `spring-boot-starter-data-redis-reactive` to `api-gateway`'s
+classpath is what makes the `RedisRateLimiter` bean available at all, and
+`spring.cloud.gateway.default-filters` (config-repo/api-gateway.yml) applies
+its `RequestRateLimiter` filter to *every* route — not one route's filter
+chain — matching "before they reach any core service" rather than "before
+they reach auth-service." `replenishRate: 10` / `burstCapacity: 20` /
+`requestedTokens: 1` are the exact property names `RedisRateLimiter` exposes
+and mirror Spring's own documented example values.
+
+**`RateLimitConfig`** (new, `api-gateway/config`) supplies the one piece
+Spring Cloud Gateway can't default sensibly on its own: the `KeyResolver`
+bean the filter's `key-resolver: "#{@remoteAddressKeyResolver}"` SpEL
+reference points at. The built-in default, `PrincipalNameKeyResolver`, keys
+on the authenticated principal — useless for exactly the two endpoints this
+milestone's own threat model (brute-force) centers on, `POST
+/api/v1/auth/login` and `/register`, both `permitAll()` and therefore
+carrying no principal at all; worse, Spring Cloud Gateway denies a request
+outright when its `KeyResolver` yields no key, so a principal-keyed resolver
+would end up blocking all unauthenticated traffic rather than throttling it.
+`remoteAddressKeyResolver` keys on client IP instead — the one identity every
+request has, authenticated or not — with a named fallback key
+(`"unresolved-remote-address"`) rather than `Mono.empty()` for the rare case
+the remote address itself can't be resolved, so that edge case degrades to
+one shared bucket instead of an outright, confusing deny.
+
+Redis itself gets an explicit `spring.data.redis.timeout: 1000ms`
+(config-repo/api-gateway.yml) for the same reason every other external
+dependency in this platform has one (Milestone 11's Feign defaults,
+Milestone 13's exchange-rate `WebClient`): `RedisRateLimiter`'s default
+behavior on a clean Redis error is to fail open (allow the request through
+rather than block the Gateway on it — community-confirmed against
+[spring-cloud-gateway#886](https://github.com/spring-cloud/spring-cloud-gateway/issues/886),
+since the reference docs don't spell this out explicitly), but a *degraded*,
+not cleanly-down, Redis is a different failure mode entirely — a real,
+reported case ([spring-cloud-gateway#3373](https://github.com/spring-cloud/spring-cloud-gateway/issues/3373))
+where every gated request queued behind a slow Lua-script round trip rather
+than being quickly allowed or denied, because nothing bounded that round
+trip's own latency. The explicit timeout is what turns "degraded Redis hangs
+the whole Gateway" into "degraded Redis fails open quickly," consistent with
+this platform's one rule for every dependency it doesn't own: never wait on
+it unbounded.
+
+**Q51: How do you implement rate limiting / throttling at the gateway
+level?** By making the gateway itself the enforcement point, before a request
+ever reaches a core service — exactly what `spring.cloud.gateway.default-
+filters`' `RequestRateLimiter` entry does here, applied platform-wide rather
+than per-route. Three pieces are needed: an algorithm and its state (this
+platform uses `RedisRateLimiter`'s token bucket, with the bucket's token
+count held in Redis rather than in-process, so the limit holds correctly
+across every api-gateway instance sharing that Redis, not per-instance); a
+key to bucket requests by (`KeyResolver` — IP here, since the threat model is
+pre-authentication brute-force, though a principal or API-key resolver suits
+a different threat model equally well); and a response when the bucket is
+empty (`429 Too Many Requests` by default, not a silent drop or a hang,
+giving a well-behaved client an unambiguous, retryable signal).
+
+**Q52: Token bucket vs. leaky bucket vs. fixed window — how do they differ
+under burst traffic?** All three cap *average* rate, but each treats a short
+burst differently. **Fixed window** (count requests in discrete window, e.g.
+clock-aligned 1-second buckets, reset to zero each new window) is the
+simplest and cheapest, but allows up to 2x the configured rate across a
+window *boundary* — a burst at 23:59:59.9 followed by another at 00:00:00.1
+both land inside their own empty window and both pass, even though they're
+100ms apart. **Leaky bucket** (requests queue into a bucket that drains at a
+constant rate; the bucket size bounds how much can queue, not how fast a
+burst is admitted) smooths output to a strictly constant rate — it eliminates
+bursty *downstream* traffic entirely, at the cost of added latency for
+anything that queues rather than being rejected outright. **Token bucket**
+(tokens refill continuously at `replenishRate`; a request is admitted
+instantly if a token is available, up to `burstCapacity` tokens banked) is
+the middle ground this milestone uses: it allows a genuine, legitimate burst
+up to the bucket's full capacity to pass through with zero added latency
+(unlike leaky bucket, which would queue/delay it), while still bounding the
+*sustained* long-run rate to `replenishRate` once the banked tokens are
+spent — not a flat per-window cap that resets predictably like fixed window,
+which makes it harder for an attacker to time a burst around a window
+boundary the way fixed window allows.
+
+🔥 **Chaos Lab — try it yourself:**
+
+1. `source scripts/smoke-env.sh` to get an authenticated `$AUTH` and
+   `$USER_ID`/`$CATEGORY_ID` for comparison, then hammer the **unauthenticated**
+   login endpoint past `burstCapacity` (20) from the same IP in a tight loop:
+   ```bash
+   for i in {1..25}; do
+     curl -s -o /dev/null -w "%{http_code} " -X POST $GW/api/v1/auth/login \
+       -H "Content-Type: application/json" \
+       -d '{"email":"nobody@spendwise.dev","rawPassword":"wrong"}'
+   done
+   echo
+   ```
+   Expect the first ~20 to return `401` (a genuinely wrong password, correctly
+   rejected by auth-service) and the remainder to flip to `429` — the token
+   bucket empties, and the Gateway itself starts rejecting before auth-service
+   ever sees the remaining attempts.
+2. Confirm it's actually Redis holding the bucket, not in-memory per-instance
+   state: `redis-cli -h localhost -p 6379 KEYS 'request_rate_limiter.*'` shows
+   the keys `RedisRateLimiter`'s Lua script maintains, keyed by the IP
+   `remoteAddressKeyResolver` resolved.
+3. Wait a few seconds (tokens refill at `replenishRate: 10`/sec) and repeat a
+   single request — it succeeds again (`401`, not `429`), confirming this is a
+   genuine leaky/refilling bucket, not a one-time lockout.
+4. Confirm an authenticated, already-passing-traffic route is governed by the
+   *same* bucket (one shared filter, applied platform-wide, not a login-only
+   special case) by immediately following the burst above with one authenticated
+   call from the same IP:
+   ```bash
+   curl -s -o /dev/null -w "%{http_code}\n" $GW/api/v1/users/$USER_ID -H "$AUTH"
+   ```
+   If step 1's burst hasn't yet refilled past `requestedTokens: 1`, this also
+   returns `429` — the bucket is per-IP across every route, not per-route.
+
+### Validating Milestone 14
+
+1. **Structural checks** — `xmllint --noout api-gateway/pom.xml`; parse
+   `config-repo/api-gateway.yml` and `docker-compose.yml` with PyYAML;
+   `docker compose config -q`; `javac` syntax-only pass on `RateLimitConfig.java`
+   (as with every milestone in this sandbox, a full `mvn compile` isn't
+   possible here — only missing-symbol errors from the absent classpath are
+   expected, zero syntax errors).
+2. **Rebuild and bring the stack up**, including the new `redis` service:
+   ```bash
+   docker compose up -d redis
+   docker compose up -d --build api-gateway
+   ```
+3. **Confirm Redis is actually reachable and the bean wiring works** —
+   `docker compose logs api-gateway --since 2m | grep -i redis` should show no
+   connection errors, and `GET $GW/actuator/health` should report `UP` (a
+   broken Redis connection surfaces there via Spring Boot's auto-configured
+   Redis health indicator).
+4. **Confirm the happy path is unaffected** — a normal, low-rate sequence of
+   authenticated calls through the Gateway (e.g. re-run Milestone 13's own
+   happy-path check) should see no `429`s at all; this is a regression check
+   that the filter isn't so aggressive it interferes with ordinary traffic.
+5. **Confirm the Chaos Lab scenario above** end-to-end — the burst past 20
+   flips to `429`, the Redis keys are visible, the bucket refills over time,
+   and the same bucket governs an authenticated route too. These are written
+   as pass/fail checks with an expected status code, not just "observe the
+   logs."
+6. **Confirm the fail-open behavior documented above** (optional, more
+   involved): `docker compose stop redis`, then send one request through any
+   route. Expect it to still succeed (not hang, not `5xx`) within roughly
+   `spring.data.redis.timeout` (1s) — proving the explicit Redis timeout is
+   actually bounding the degraded-Redis case, not just configured and unused.
+   `docker compose start redis` afterward before moving on.
+
+Next: Milestone 15 — Protocol Diversity (gRPC & Reactive WebFlux).
 
 ## API Versioning & Deprecation Policy
 
