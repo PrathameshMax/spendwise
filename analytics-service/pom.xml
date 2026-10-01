@@ -13,12 +13,18 @@
     <artifactId>analytics-service</artifactId>
     <packaging>jar</packaging>
     <name>SpendWise :: Analytics Service</name>
-    <description>CQRS read-side service serving denormalized dashboard projections</description>
+    <description>Reactive read-side service serving dashboard projections over a low-latency gRPC call to budget-service</description>
 
     <dependencies>
+        <!-- Milestone 15 — replaces spring-boot-starter-web: this service's whole point
+             from this milestone onward is demonstrating a genuinely non-blocking call
+             chain (WebFlux controller -> gRPC async stub -> R2DBC), so it is rebuilt on
+             the reactive stack rather than bolting a non-blocking client onto a
+             servlet/Tomcat request thread, which would still block that thread for the
+             duration of the call regardless of how the client itself behaves (Q54/Q55). -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-web</artifactId>
+            <artifactId>spring-boot-starter-webflux</artifactId>
         </dependency>
         <dependency>
             <groupId>io.micrometer</groupId>
@@ -27,6 +33,39 @@
         <dependency>
             <groupId>io.opentelemetry</groupId>
             <artifactId>opentelemetry-exporter-zipkin</artifactId>
+        </dependency>
+        <!-- Milestone 15 — this service's first real persistence: a dashboard_query_log
+             row per served dashboard query, written over Spring Data R2DBC (reactive,
+             non-blocking Postgres access) rather than Spring Data JPA, which is
+             blocking-JDBC-based and would reintroduce exactly the thread-blocking this
+             milestone's WebFlux rebuild exists to avoid. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-r2dbc</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>r2dbc-postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <!-- Milestone 15 — Flyway itself only ever speaks JDBC, never R2DBC, so the
+             blocking JDBC driver is still needed as a migration-time-only dependency;
+             see FlywayMigrationConfig for how its own DataSource is kept entirely
+             separate from, and never substituted for, the reactive R2DBC
+             ConnectionFactory the rest of this service uses for actual request
+             handling. -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
         </dependency>
         <dependency>
             <groupId>org.springframework.cloud</groupId>
@@ -53,13 +92,35 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- Milestone 15 — this service's first real integration tests exercise a
+             genuine Postgres instance via R2DBC, the same Testcontainers-backed
+             pattern every JPA-based service's own *RepositoryIT already uses. -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>r2dbc</artifactId>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>io.zipkin.reporter2</groupId>
             <artifactId>zipkin-sender-urlconnection</artifactId>
         </dependency>
+        <!-- Milestone 15 — the WebFlux-flavored springdoc starter, replacing the
+             webmvc-flavored one: springdoc's webmvc starter assumes a DispatcherServlet
+             is present and simply does not register its /v3/api-docs or swagger-ui
+             routes under WebFlux's DispatcherHandler at all. -->
         <dependency>
             <groupId>org.springdoc</groupId>
-            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+            <artifactId>springdoc-openapi-starter-webflux-ui</artifactId>
         </dependency>
         <dependency>
             <groupId>org.springframework.retry</groupId>
@@ -69,13 +130,65 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-aop</artifactId>
         </dependency>
+        <!-- Milestone 15 — the gRPC client side of the same transport budget-service's
+             pom.xml adds the server side of; see that module's pom.xml comments for the
+             full net.devh/grpc-bom/protobuf-maven-plugin rationale, identical here. -->
+        <dependency>
+            <groupId>net.devh</groupId>
+            <artifactId>grpc-client-spring-boot-starter</artifactId>
+            <version>${grpc-spring-boot-starter.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-protobuf</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-stub</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-netty-shaded</artifactId>
+            <scope>runtime</scope>
+        </dependency>
     </dependencies>
 
     <build>
+        <extensions>
+            <extension>
+                <groupId>kr.motd.maven</groupId>
+                <artifactId>os-maven-plugin</artifactId>
+                <version>${os-maven-plugin.version}</version>
+            </extension>
+        </extensions>
         <plugins>
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+            <!-- Milestone 15 — compiles src/main/proto/budget_summary.proto into the
+                 same generated message classes and the BudgetSummaryServiceGrpc client
+                 stub base class; see budget-service/pom.xml's identical plugin block for
+                 the full rationale (including why protoc codegen could not be exercised
+                 in this milestone's own build sandbox). -->
+            <plugin>
+                <groupId>org.xolstice.maven.plugins</groupId>
+                <artifactId>protobuf-maven-plugin</artifactId>
+                <version>${protobuf-maven-plugin.version}</version>
+                <configuration>
+                    <protocArtifact>com.google.protobuf:protoc:${protobuf.version}:exe:${os.detected.classifier}</protocArtifact>
+                    <pluginId>grpc-java</pluginId>
+                    <pluginArtifact>io.grpc:protoc-gen-grpc-java:${grpc.version}:exe:${os.detected.classifier}</pluginArtifact>
+                    <protoSourceRoot>${project.basedir}/src/main/proto</protoSourceRoot>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>compile</goal>
+                            <goal>compile-custom</goal>
+                        </goals>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>

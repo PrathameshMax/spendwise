@@ -1068,7 +1068,330 @@ boundary the way fixed window allows.
    actually bounding the degraded-Redis case, not just configured and unused.
    `docker compose start redis` afterward before moving on.
 
-Next: Milestone 15 — Protocol Diversity (gRPC & Reactive WebFlux).
+**Milestone 15 complete** — Protocol Diversity: gRPC & Reactive WebFlux. No
+fixes were raised validating Milestone 14 beyond its own dedicated fix commit
+(already folded in there, not deferred), so nothing folds in here beyond this
+milestone's own scope.
+
+Scoped exactly to the roadmap's two sentences: a second internal transport
+(gRPC, Protobuf contract) alongside REST, budget-service exposing it and
+analytics-service calling it for a low-latency internal query with a
+REST-vs-gRPC payload/latency benchmark; and, separately, analytics-service
+rebuilt on Spring WebFlux + R2DBC rather than Spring MVC/JPA — Postgres/R2DBC
+chosen over the roadmap's other explicitly-offered option (a reactive MongoDB
+driver), since this platform already runs one Postgres instance with
+schema-per-service isolation for every other `*_db`, and introducing MongoDB
+as a second datastore technology for one service's data would be exactly the
+kind of unrequested substep the roadmap doesn't ask for.
+
+**The gRPC server side — `budget-service`.** `src/main/proto/budget_summary.proto`
+defines `BudgetSummaryService.GetSummary`, a field-for-field mirror of
+`BudgetController#summary`'s existing `GET /api/v1/budgets/{userId}/summary`
+(same `userId`/`periodMonth` inputs, same response shape) — monetary fields
+are encoded as `string`, never a numeric protobuf type, for the same
+no-binary-floating-point-for-currency reason this platform never uses
+`double`/`float` for money anywhere else, and it also keeps the benchmark
+honest: both wire formats encode the same amount as text, so the comparison
+measures transport/encoding efficiency, not a format change. **`BudgetSummaryGrpcService`**
+(new, `budget-service/grpc`) is this annotation's exact server-side analogue
+of `@RestController`: `net.devh`'s `@GrpcService` registers it onto a second,
+Netty-based gRPC server listening on its own port (`grpc.server.port: 9090`,
+config-repo/budget-service.yml) — entirely separate from Tomcat's own 8084,
+since gRPC's HTTP/2-trailers-based framing isn't something the Servlet stack
+speaks. It delegates straight to the same `BudgetService.summary(...)` bean
+`BudgetController` itself calls, so the two transports can never drift in
+behavior; the one thing it does itself is map failure into gRPC's own
+`Status` codes (`INVALID_ARGUMENT` for a malformed `userId`/`periodMonth`)
+rather than reusing `GlobalExceptionHandler`, whose `@RestControllerAdvice`
+machinery a gRPC call never passes through at all. Server reflection
+(`grpcurl list`/`describe` without shipping the `.proto` to whoever's
+testing) comes free from `grpc-services` being on the classpath — net.devh
+enables it by default (`reflection-service-enabled` defaults to `true`,
+confirmed directly against
+[net.devh's own `GrpcReflectionServiceAutoConfiguration` source](https://github.com/yidongnan/grpc-spring-boot-starter/blob/master/grpc-server-spring-boot-autoconfigure/src/main/java/net/devh/boot/grpc/server/autoconfigure/GrpcReflectionServiceAutoConfiguration.java)),
+so no extra property was added for it. `grpc.version=1.68.1`/
+`protobuf.version=3.25.5`/`protobuf-maven-plugin.version=0.6.1` (parent
+`pom.xml`) are not an independently-guessed trio: they're the exact,
+maintainer-pinned combination
+[grpc-java's own official examples module uses at tag v1.68.1](https://github.com/grpc/grpc-java/blob/v1.68.1/examples/pom.xml),
+since grpc-java and protobuf-java ship on separate release cadences and an
+uncoordinated pairing is a real, common source of codegen/runtime mismatches.
+`grpc-netty-shaded`, not plain `grpc-netty`, avoids a Netty-version collision
+with the Reactor Netty this same milestone puts on analytics-service's
+classpath. The new `io.grpc:grpc-bom` import in the parent `pom.xml`'s
+`dependencyManagement` is what lets both budget-service (server) and
+analytics-service (client) resolve every `io.grpc:*` artifact to the
+identical grpc-java release, the same role `spring-cloud-dependencies`
+already plays for every `spring-cloud-starter-*` artifact.
+
+**Why the `.proto` is duplicated, not shared via `spendwise-common`.** This
+platform's own established convention since Milestone 10 (see
+`UserServiceClient`/`UserExistenceResponse`) is that a service consuming
+another service's contract owns its own independent copy of exactly what it
+needs, rather than sharing contract types across services —
+`spendwise-common` is reserved for cross-cutting infrastructure, never
+business/domain-shaped contracts, so each service's module stays
+polyrepo-extractable without carrying a shared-contract dependency along with
+it. A generated gRPC stub is no different in kind from a hand-written Feign
+interface in this respect — it simply can't be hand-copied, since the wire
+format is codegen'd — so the `.proto` *source* is what's duplicated instead
+(byte-for-byte identical in both `budget-service/src/main/proto/` and
+`analytics-service/src/main/proto/`), and each service's own
+`protobuf-maven-plugin` execution compiles its own copy independently. The
+two must be kept in sync by hand if this contract ever changes — the same
+maintenance cost duplicating `UserExistenceResponse` already carries,
+accepted for the same reason.
+
+**The gRPC client side and WebFlux rebuild — `analytics-service`.**
+`pom.xml` is rebuilt wholesale: `spring-boot-starter-web` →
+`spring-boot-starter-webflux`, `springdoc-openapi-starter-webmvc-ui` →
+`-webflux-ui` (the webmvc-flavored springdoc starter assumes a
+`DispatcherServlet` and simply never registers its routes under WebFlux's
+`DispatcherHandler`), plus `spring-boot-starter-data-r2dbc`,
+`r2dbc-postgresql`, a bare JDBC `postgresql` driver (Flyway-only, see below),
+`flyway-core`/`flyway-database-postgresql`, and
+`net.devh:grpc-client-spring-boot-starter` + `grpc-protobuf`/`grpc-stub`/
+`grpc-netty-shaded`. The async stub, never the blocking one, is injected into
+the new **`BudgetSummaryGrpcClient`** (`analytics-service/grpc`): a blocking
+stub's call parks the calling thread until the response arrives, which —
+called from a WebFlux request-handling thread — would tie up one of Netty's
+small, shared event-loop threads for the full round-trip latency of every
+dashboard request, defeating the entire point of this rebuild (Q54/Q55).
+`Mono.create` bridges the stub's `StreamObserver` callback into the single-item
+`Mono` the rest of the service composes over — the standard, documented
+pattern for wrapping a callback-based async API in Project Reactor.
+Discovery was deliberately *not* used for reaching budget-service
+(net.devh's own `discovery:///`-scheme, Eureka-integrated option): its
+server-side metadata-publishing behavior couldn't be verified in this
+sandbox, so `grpc.client.budget-service.address: static://${BUDGET_SERVICE_HOST:localhost}:9090`
+(config-repo/analytics-service.yml) uses the same static `host:port`
+addressing this platform's own HTTP routes already use (api-gateway's
+`config-repo/api-gateway.yml`) — the lower-risk, already-proven-out choice,
+not a new one invented for this milestone. `negotiationType: PLAINTEXT`
+matches budget-service's own server, which defaults to plaintext (TLS is
+opt-in there via `grpc.server.security.enabled`, left unset) — acceptable
+only because this port never leaves the docker-compose network, the same
+trust boundary this platform's internal Postgres/Redis/Eureka/Zipkin traffic
+already relies on.
+
+**`AnalyticsService`** (new, `service`) composes the one real non-blocking
+call chain this milestone exists to prove out: fetch the summary over gRPC,
+then — strictly sequenced *after* that succeeds, not in parallel — write a
+**`DashboardQueryLog`** row (new, `domain`, via the new reactive
+**`DashboardQueryLogRepository`**) recording that the query happened, before
+returning the combined **`DashboardResponse`** to **`AnalyticsController`**'s
+`GET /api/v1/analytics/dashboard/{userId}?periodMonth=`. `DashboardQueryLog`
+is this service's first real persistence, and deliberately leaves `id` null
+at construction rather than application-assigning a UUID the way
+budget-service's Hibernate-backed `Budget` entity does (`GenerationType.UUID`):
+Spring Data R2DBC's default new-vs-existing detection for a reference-typed
+`@Id` is "null means new," so the new `V1__create_dashboard_query_log_table.sql`
+migration's own `DEFAULT gen_random_uuid()` (built into Postgres core since
+version 13 — no `pgcrypto` extension needed on this platform's
+`postgres:16-alpine` image) generates the value, and `r2dbc-postgresql`
+returns it on the same `INSERT`. **`FlywayMigrationConfig`** (new, `config`)
+is the one piece of this rebuild that could not simply follow every JPA-based
+service's own auto-configured Flyway bean: Boot's `FlywayAutoConfiguration`
+(explicitly excluded on `AnalyticsServiceApplication`) resolves its JDBC
+connection from a `DataSource` bean this reactive, R2DBC-only service never
+creates, and Flyway itself has no R2DBC support at all — it only ever speaks
+JDBC. The fix (confirmed against a working reference implementation of this
+exact "R2DBC app, JDBC-only Flyway migration" combination, since Spring
+Boot's own reference docs don't cover it) is a manual
+`@Bean(initMethod = "migrate") Flyway` that builds its own short-lived JDBC
+connection directly from `spring.flyway.*` properties, entirely independent
+of the R2DBC `ConnectionFactory` (`spring.r2dbc.url`) the rest of the service
+uses to actually serve requests — the two never share a connection pool,
+driver, or lifecycle.
+
+**Correlation-id and user-context propagation on the reactive stack.** Every
+servlet-based service's `CorrelationIdFilter`/`UserContextFilter`
+(spendwise-common) extend `jakarta.servlet.http.HttpFilter` — a type that
+doesn't exist on analytics-service's Netty runtime at all, not merely one it
+stops using, so simply reusing them was never an option. Two new siblings,
+**`ReactiveCorrelationIdFilter`** and **`ReactiveUserContextFilter`**
+(spendwise-common, both plain `WebFilter` beans analytics-service's
+`TracingConfig`/`UserContextConfig` now register, no `FilterRegistrationBean`
+needed — a WebFlux `WebFilter` bean already applies to every request by
+construction), do the equivalent job. Neither puts its value into the SLF4J
+MDC / `UserContextHolder` `ThreadLocal`s the servlet versions use: a single
+WebFlux request is handed across multiple different event-loop threads over
+its own lifetime while those same few threads concurrently interleave *other*
+requests' work at the same time, so a `ThreadLocal` write with no
+same-thread-guaranteed cleanup would leak one request's correlation id (or
+caller identity) into some unrelated request's logs the moment that thread
+picks up different work next — a hazard this platform's synchronous,
+one-thread-per-request servlet services never had to consider. Both instead
+write into Reactor `Context` (`contextWrite`), read back out anywhere
+downstream — including past a thread-hop — via `Mono.deferContextual(...)`.
+**`AbstractReactiveGlobalExceptionHandler`** (spendwise-common, the WebFlux
+twin of `AbstractGlobalExceptionHandler`, activated by analytics-service's
+own thin `GlobalExceptionHandler` subclass exactly as the servlet version is)
+reads the correlation id the same way for its ProblemDetail enrichment, and
+overrides `handleWebExchangeBindException` rather than
+`handleMethodArgumentNotValid` — WebFlux has no `MethodArgumentNotValidException`
+at all, since that type is tied to Spring MVC's own servlet-dispatch
+method-argument resolution; a failed `@Valid @RequestBody` binding in WebFlux
+throws `WebExchangeBindException` instead, confirmed directly against
+spring-webflux's own `ResponseEntityExceptionHandler` source at tag v6.2.1
+(the exact Spring Framework version this platform's `spring-boot.version=3.4.1`
+BOM pulls in). The one place this milestone's own code *does* cross a real
+thread boundary mid-request — `BudgetSummaryGrpcClient`'s gRPC callback,
+which runs on gRPC's own executor thread, not analytics-service's
+Reactor/Netty thread, so Reactor `Context` itself can't reach it there — uses
+a narrowly-scoped `MDC.put`/`remove` bracketing one synchronous log statement
+instead; scoped tightly enough around a single callback invocation that it
+can never leak into an unrelated request the way a filter-wide `MDC.put`
+would. `spendwise-common/pom.xml` gets `spring-webflux` as a `provided`
+dependency (mirroring `spring-webmvc`'s own existing `provided` scope) so
+neither framework ever becomes a transitive dependency of a service on the
+other stack. The HMAC verify/parse logic `UserContextFilter` previously
+implemented as private methods is extracted into a new shared
+**`UserContextVerifier`** (spendwise-common) so this security-sensitive
+signature-checking code has exactly one implementation, called by both the
+servlet and reactive filters, rather than two copies that could silently
+drift apart.
+
+**Q53: REST vs. gRPC vs. messaging — how do you choose for a given internal
+call?** By what the call actually needs, not a platform-wide default. REST/
+JSON is the right default for anything public-facing or cross-team: human-
+readable, universally tooled, and this platform already standardizes on it
+for every external-facing endpoint. gRPC earns its added complexity
+(Protobuf schema management, a second port/transport to operate, worse
+human-debuggability on the wire) specifically for internal, high-volume,
+latency-sensitive service-to-service calls where its binary framing and
+HTTP/2 multiplexing measurably pay for themselves — exactly this milestone's
+Analytics→Budget call, benchmarked below. Messaging (Kafka, not yet on this
+platform) is the right choice instead of either when the caller doesn't need
+an immediate response at all — fire-and-forget or eventually-consistent
+work — which neither REST nor gRPC's synchronous request/response shape fits
+well.
+
+**Q54: What is backpressure, and how does WebFlux handle a slow consumer?**
+Backpressure is the mechanism by which a slow consumer tells a fast producer
+to slow down, rather than the producer overwhelming it with unbounded,
+buffered work. WebFlux's Reactive Streams foundation makes this an explicit
+part of the subscription contract: a `Subscriber` calls `request(n)` to pull
+exactly `n` items it's ready to handle, and a well-behaved `Publisher` (every
+Reactor operator, and Spring Data R2DBC's own reactive driver) never emits
+more than that outstanding demand — the opposite of a `List`/blocking
+`Iterable`, which has no way to say "not yet." This milestone's own call
+chain demonstrates the model without needing to exercise it under real load:
+`BudgetSummaryGrpcClient`'s `Mono.create` only ever emits one item for one
+subscriber (a unary RPC), so there's exactly one unit of demand to satisfy —
+backpressure matters once a `Flux` of many items (a streaming RPC, or a
+`Flux<DashboardQueryLog>` read) is involved, which this milestone's single
+dashboard-lookup endpoint deliberately doesn't require.
+
+**Q55: Servlet stack vs. WebFlux — what actually changes at the thread-model
+level, and when is reactive not worth the complexity?** Tomcat's servlet
+model dedicates one thread per in-flight request for its entire lifetime,
+blocking that thread for however long any I/O call (a JDBC query, a Feign
+call) takes — true of every other service on this platform, which is fine
+because their thread pools are sized for their own load. WebFlux instead
+runs a small, fixed pool of event-loop threads (Reactor Netty) that are never
+blocked: a thread picks up a request, hands off the moment it would block on
+I/O, and picks up other work in the meantime, resuming the original request
+when its I/O completes — exactly why `BudgetSummaryGrpcClient` must use the
+async, not blocking, gRPC stub, and why R2DBC (not JPA) backs
+`DashboardQueryLog`; a single blocking call anywhere in a WebFlux chain stalls
+one of the only few threads the whole server has, far more damaging than the
+same block on a servlet thread pool sized in the hundreds. The trade-off: every
+dependency in the chain must actually be non-blocking end to end for this to
+pay off — a reactive controller calling even one blocking JDBC/Feign call
+gains nothing but debugging complexity (stack traces across `Mono`/`Flux`
+chains are harder to read than a straight-line servlet stack trace) while
+losing none of the risk, which is exactly why this platform rebuilds only
+analytics-service, not every service, onto WebFlux — the other services' I/O
+patterns don't currently justify the switch.
+
+🔥 **Chaos Lab — try it yourself (REST vs. gRPC payload/latency benchmark):**
+
+1. Seed a few budgets for one user via the REST API (`POST /api/v1/budgets`,
+   several categories, same `periodMonth`), then compare the two transports
+   serving the *same* underlying data:
+   ```bash
+   # REST (via the Gateway, JSON over HTTP/1.1)
+   time curl -s $GW/api/v1/budgets/$USER_ID/summary?periodMonth=2026-09 -H "$AUTH" -o /tmp/rest-summary.json
+   wc -c /tmp/rest-summary.json
+
+   # gRPC (direct to budget-service's own port, bypassing the Gateway —
+   # there is no gRPC route in RouteConfig, by design: this is an internal,
+   # service-to-service transport, never exposed externally)
+   time grpcurl -plaintext -d "{\"user_id\":\"$USER_ID\",\"period_month\":\"2026-09\"}" \
+     localhost:9090 spendwise.grpc.budget.BudgetSummaryService/GetSummary | tee /tmp/grpc-summary.json
+   wc -c /tmp/grpc-summary.json
+   ```
+   Expect the gRPC payload to come back smaller (binary field tags vs. JSON's
+   repeated string keys) and the round trip faster, more pronounced as the
+   number of budget items grows — this is `getSerializedSize()`-class savings
+   from Protobuf's binary framing, not a difference in the data itself.
+2. Exercise the actual new endpoint end to end: `curl $GW/api/v1/analytics/dashboard/$USER_ID?periodMonth=2026-09 -H "$AUTH"`
+   should return the same items the REST summary above does, proving
+   analytics-service's own gRPC call to budget-service round-tripped
+   correctly — then `docker exec spendwise-postgres psql -U spendwise -d analytics_db -c "SELECT * FROM dashboard_query_log ORDER BY queried_at DESC LIMIT 1;"`
+   should show the query just logged.
+3. `grpcurl -plaintext localhost:9090 list` and
+   `grpcurl -plaintext localhost:9090 describe spendwise.grpc.budget.BudgetSummaryService`
+   confirm server reflection works out of the box with zero extra
+   configuration, and without ever handing the `.proto` file to whoever's
+   running these commands.
+
+### Validating Milestone 15
+
+1. **Structural checks** — `xmllint --noout` every touched `pom.xml` (root,
+   `budget-service`, `analytics-service`, `spendwise-common`); parse every
+   touched `config-repo/*.yml` and `docker-compose.yml` with PyYAML;
+   `docker compose config -q`; `javac` syntax-only pass on every new/changed
+   `.java` file (as with every milestone in this sandbox, a full `mvn compile`
+   isn't possible here — no Maven Central access, so this one check could
+   only confirm the absence of real syntax errors, never that the protobuf
+   codegen or the full dependency graph actually resolves). **This is the one
+   milestone where that gap matters far more than usual**: unlike every prior
+   milestone's plain Java/Spring code, nothing here can prove the
+   `protobuf-maven-plugin` execution itself succeeds, that the generated
+   `BudgetSummaryServiceGrpc`/`BudgetSummaryItem` classes actually compile
+   against what `BudgetSummaryGrpcService`/`BudgetSummaryGrpcClient` expect of
+   them, or that the R2DBC/Flyway wiring actually connects — step 2 below, a
+   real `mvn compile`/`docker compose build` on a machine with network
+   access, is doing genuine, first-time verification work no prior milestone
+   depended on this heavily.
+2. **Rebuild every touched module and bring the stack up**, including the new
+   `analytics_db` database (created automatically by `infra/postgres-init/01-create-databases.sql`
+   on a fresh `postgres` volume — an existing volume needs
+   `docker exec spendwise-postgres psql -U spendwise -c "CREATE DATABASE analytics_db;"`
+   run by hand once, the same caveat every previous new-database milestone has
+   carried):
+   ```bash
+   docker compose up -d --build budget-service analytics-service
+   docker compose logs budget-service --since 2m | grep -iE "grpc|error"
+   docker compose logs analytics-service --since 2m | grep -iE "flyway|r2dbc|grpc|error"
+   ```
+   Confirm Flyway's migration log shows `V1__create_dashboard_query_log_table.sql`
+   applied successfully, and no gRPC channel/connection errors on either side.
+3. **Confirm both services report healthy** — `GET $GW/actuator/health` for
+   analytics-service via its docs-proxy route, or directly,
+   `curl http://localhost:8086/actuator/health`, should report `UP`, with the
+   `r2dbc` indicator specifically up (a broken R2DBC connection surfaces
+   there); same for budget-service at 8084, unaffected by the new gRPC port.
+4. **Run the Chaos Lab steps above** — the REST-vs-gRPC payload/latency
+   comparison, the dashboard endpoint round trip with its `dashboard_query_log`
+   row, and the two `grpcurl` reflection commands. These are written as
+   pass/fail checks (payload sizes differ, the query log row appears,
+   `grpcurl` returns real service/method names), not just "observe the logs."
+5. **Confirm the REST side is completely unaffected** — re-run
+   `GET /api/v1/budgets/{userId}/summary` directly (not through analytics-service)
+   and confirm it still returns `200` with the same data as before this
+   milestone; the new gRPC endpoint is a second transport over the same
+   business logic, never a replacement for the first.
+6. **Confirm the platform's full existing test suite still passes** —
+   `mvn -pl budget-service,analytics-service,spendwise-common -am test`
+   — the extracted `UserContextVerifier` and the rebuilt `GlobalExceptionHandler`/
+   `TracingConfig`/`UserContextConfig` in analytics-service are refactors of
+   working cross-cutting code, not new business logic, so this is primarily a
+   regression check that nothing silently broke in the extraction.
+
+Next: Milestone 16 — Atomic State Processing (The Transactional Outbox Pattern).
 
 ## API Versioning & Deprecation Policy
 

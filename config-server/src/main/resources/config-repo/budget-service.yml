@@ -12,3 +12,22 @@ management:
       group:
         readiness:
           include: readinessState,db
+
+# Milestone 15 — the gRPC mirror of BudgetController#summary listens on its own
+# Netty-based server, entirely separate from Tomcat's own 8084: gRPC's HTTP/2
+# trailers-based framing isn't something the Servlet stack speaks, so there was
+# never a way to share one port between the two transports. net.devh's
+# GrpcReflectionServiceAutoConfiguration auto-registers server reflection
+# (grpc.server.reflection-service-enabled defaults to true whenever grpc-services
+# is on the classpath, which budget-service's pom.xml now declares) — no extra
+# property needed for `grpcurl list`/`describe` to work against this port, see
+# this milestone's own "Validating Milestone 15" runbook. No grpc.server.security
+# block below: net.devh's gRPC server defaults to plaintext (TLS is opt-in via
+# grpc.server.security.enabled), matching analytics-service's own
+# negotiationType: PLAINTEXT client config — acceptable only because this port
+# never leaves the docker-compose network api-gateway's own JWT-validated public
+# ingress already gates (same trust boundary this platform's internal Postgres/
+# Redis/Eureka/Zipkin traffic already relies on, none of it TLS-terminated either).
+grpc:
+  server:
+    port: 9090

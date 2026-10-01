@@ -20,7 +20,8 @@ public class OpenApiConfig {
                 .info(new Info()
                         .title("SpendWise :: Analytics Service")
                         .version("v1")
-                        .description("CQRS read-side dashboard projections (no REST yet). This OpenAPI document is a structural placeholder — the springdoc wiring is in place ahead of the REST surface Milestone 15 adds, so nothing has to be retrofitted later. "
+                        .description("Dashboard projections served over a low-latency internal gRPC call to "
+                                + "budget-service (Milestone 15). "
                                 + "URI-based versioning (/api/v1/...) — see the platform README's "
                                 + "\"API Versioning & Deprecation Policy\" section for how a future "
                                 + "/api/v2/... would coexist and be deprecated."));

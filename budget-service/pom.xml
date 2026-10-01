@@ -124,9 +124,58 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-aop</artifactId>
         </dependency>
+        <!-- Milestone 15 — the second internal transport the roadmap asks for, alongside
+             the existing REST summary endpoint (BudgetController#summary) this gRPC
+             endpoint mirrors exactly. net.devh's @GrpcService auto-registers the server
+             bean below onto its own Netty server (grpc.server.port, config-repo/
+             budget-service.yml) — a separate port from Tomcat's 8084, not a shared one;
+             gRPC's framing (HTTP/2 trailers-based status codes) isn't something Tomcat's
+             Servlet stack speaks, so sharing a port was never an option. -->
+        <dependency>
+            <groupId>net.devh</groupId>
+            <artifactId>grpc-server-spring-boot-starter</artifactId>
+            <version>${grpc-spring-boot-starter.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-protobuf</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-stub</artifactId>
+        </dependency>
+        <!-- Milestone 15 — registers gRPC's standard server-reflection service, so
+             `grpcurl -plaintext localhost:9090 list` and `grpcurl ... describe` work
+             against this server without shipping the .proto file to whoever is
+             testing it; used in this milestone's own validation steps below. -->
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-services</artifactId>
+        </dependency>
+        <!-- Shaded, not plain grpc-netty: this platform's api-gateway (and, as of this
+             same milestone, analytics-service) already runs Reactor Netty for WebFlux.
+             grpc-netty-shaded repackages gRPC's own Netty dependency under a relocated
+             package so its version can never collide with Reactor Netty's own, which
+             plain grpc-netty cannot guarantee — the standard, documented reason the
+             shaded artifact exists at all. -->
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-netty-shaded</artifactId>
+            <scope>runtime</scope>
+        </dependency>
     </dependencies>
 
     <build>
+        <extensions>
+            <!-- Resolves `${os.detected.classifier}` below to the build machine's actual
+                 platform (e.g. linux-x86_64) so the protoc/protoc-gen-grpc-java binaries
+                 pulled from Maven Central match the OS actually running the build. -->
+            <extension>
+                <groupId>kr.motd.maven</groupId>
+                <artifactId>os-maven-plugin</artifactId>
+                <version>${os-maven-plugin.version}</version>
+            </extension>
+        </extensions>
         <plugins>
             <plugin>
                 <groupId>org.springframework.boot</groupId>
@@ -144,6 +193,33 @@
                         </path>
                     </annotationProcessorPaths>
                 </configuration>
+            </plugin>
+            <!-- Milestone 15 — compiles src/main/proto/budget_summary.proto into the
+                 request/response message classes and the BudgetSummaryServiceGrpc
+                 server/stub base classes, before the main compile phase runs (protoc
+                 codegen could not be exercised in this milestone's own build sandbox,
+                 which has no Maven Central access — this is the one piece of this
+                 milestone's code that a real `mvn compile` on a machine with network
+                 access is actually responsible for proving out; see this module's and
+                 analytics-service's README validation steps). -->
+            <plugin>
+                <groupId>org.xolstice.maven.plugins</groupId>
+                <artifactId>protobuf-maven-plugin</artifactId>
+                <version>${protobuf-maven-plugin.version}</version>
+                <configuration>
+                    <protocArtifact>com.google.protobuf:protoc:${protobuf.version}:exe:${os.detected.classifier}</protocArtifact>
+                    <pluginId>grpc-java</pluginId>
+                    <pluginArtifact>io.grpc:protoc-gen-grpc-java:${grpc.version}:exe:${os.detected.classifier}</pluginArtifact>
+                    <protoSourceRoot>${project.basedir}/src/main/proto</protoSourceRoot>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>compile</goal>
+                            <goal>compile-custom</goal>
+                        </goals>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>

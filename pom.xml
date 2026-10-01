@@ -45,6 +45,28 @@
              primitives layered directly over the Feign clients declared in
              transaction-service and budget-service. -->
         <resilience4j.version>2.2.0</resilience4j.version>
+        <!-- Not part of spring-boot-dependencies' or spring-cloud-dependencies' BOM, so
+             pinned explicitly here (Milestone 15) — this exact 1.68.1/3.25.5/0.6.1 trio
+             is the maintainer-chosen, self-consistent combination grpc-java's own
+             official examples module pins (confirmed against
+             https://github.com/grpc/grpc-java/blob/v1.68.1/examples/pom.xml), not an
+             independently-guessed set of versions: grpc-java and protobuf-java ship on
+             separate release cadences, and an uncoordinated pairing is a common source
+             of runtime/codegen mismatches this platform has no way to detect before a
+             real `mvn compile` runs (no Maven Central access in the build sandbox this
+             milestone was authored in — see budget-service/analytics-service pom.xml
+             comments for what that does and does not mean for validation). -->
+        <grpc.version>1.68.1</grpc.version>
+        <protobuf.version>3.25.5</protobuf.version>
+        <protobuf-maven-plugin.version>0.6.1</protobuf-maven-plugin.version>
+        <os-maven-plugin.version>1.7.1</os-maven-plugin.version>
+        <!-- net.devh's starter is a thin autoconfiguration layer (the @GrpcService/
+             @GrpcClient annotations and the server/channel lifecycle beans) that does not
+             publish its own BOM; grpc-bom above is what actually pins every io.grpc:*
+             artifact's version platform-wide, same role spring-boot-dependencies/
+             spring-cloud-dependencies play for everything else in this table. Latest
+             stable per Maven Central as of this milestone. -->
+        <grpc-spring-boot-starter.version>3.1.0.RELEASE</grpc-spring-boot-starter.version>
     </properties>
 
     <dependencyManagement>
@@ -92,6 +114,19 @@
                 <groupId>io.github.resilience4j</groupId>
                 <artifactId>resilience4j-spring-boot3</artifactId>
                 <version>${resilience4j.version}</version>
+            </dependency>
+            <!-- Milestone 15 — imported (not just a single artifact version pinned) because
+                 grpc-protobuf/grpc-stub/grpc-services/grpc-netty-shaded must all resolve to
+                 the SAME grpc-java release in both budget-service (gRPC server) and
+                 analytics-service (gRPC client); importing the BOM once here guarantees
+                 that platform-wide the same way spring-cloud-dependencies already does for
+                 every spring-cloud-starter-* artifact above. -->
+            <dependency>
+                <groupId>io.grpc</groupId>
+                <artifactId>grpc-bom</artifactId>
+                <version>${grpc.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
             </dependency>
         </dependencies>
     </dependencyManagement>
