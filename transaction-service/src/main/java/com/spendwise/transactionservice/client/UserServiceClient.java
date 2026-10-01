@@ -1,6 +1,10 @@
 package com.spendwise.transactionservice.client;
 
+import com.spendwise.common.exception.DownstreamServiceUnavailableException;
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import io.github.resilience4j.retry.annotation.Retry;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -21,7 +25,11 @@ import java.util.UUID;
  * business-domain-specific (it names a concrete service and a concrete
  * endpoint) — spendwise-common carries zero business logic, so
  * budget-service declares its own identical-looking copy of this interface
- * rather than sharing this one.
+ * rather than sharing this one. Milestone 12's {@code @CircuitBreaker} below
+ * is applied <b>only</b> here, not on budget-service's copy — the roadmap
+ * scopes this milestone explicitly to "the Transaction→User cross-service
+ * call," not both consumers; budget-service keeps Milestone 11's
+ * Retry-with-timeouts protection only.
  *
  * <p>{@code @Retry(name = "userServiceLookup")} (Milestone 11) is placed on
  * this interface method, not on the {@code verifyUserExists} call site in
@@ -29,16 +37,52 @@ import java.util.UUID;
  * Spring-AOP-proxy-based, so it only intercepts a call that arrives from
  * outside the bean; {@code verifyUserExists} calls this method externally
  * (crossing the Feign client bean's proxy boundary), which is exactly what
- * makes the annotation effective here. The named instance's policy
- * (exponential backoff + jitter, narrowed to {@code feign.RetryableException}
- * only) is centralized in config-repo/application.yml alongside this
- * platform's Feign connect/read timeouts, both being generic Feign
- * infrastructure concerns rather than anything specific to this contract.
+ * makes the annotation effective here.
+ *
+ * <p>Stacking order matters (Milestone 13 digs into this further):
+ * Resilience4j's default aspect order makes {@code @Retry} the <b>outer</b>
+ * layer and {@code @CircuitBreaker} the <b>inner</b> one — each of Retry's
+ * attempts makes its own fresh pass through the CircuitBreaker. That is why
+ * {@code fallbackMethod} is declared on {@code @Retry}, not on
+ * {@code @CircuitBreaker}: a fallback attached to the inner annotation would
+ * fire on every single attempt and silently swallow Retry's remaining
+ * attempts before they ever ran. Attached to the outer one instead, the
+ * fallback only fires once, after the whole Retry+CircuitBreaker chain has
+ * had its say — whether that means "all retries exhausted" or "the circuit
+ * is already OPEN and rejected the call outright with
+ * {@code CallNotPermittedException}" (Q46).
+ *
+ * <p>Both the retry policy (config-repo/application.yml) and the circuit
+ * breaker policy (this service's own application.yml) exclude
+ * {@code feign.FeignException$NotFound} via their respective
+ * {@code ignore-exceptions} — without that, a perfectly healthy user-service
+ * answering "no such user" would both count as a circuit-breaker failure and
+ * get misrouted through {@link #getByIdFallback}, turning a correct 404 into
+ * a false 503 (Q47 — a business answer is not a partial failure).
  */
 @FeignClient(name = "user-service")
 public interface UserServiceClient {
 
-    @Retry(name = "userServiceLookup")
+    Logger LOG = LoggerFactory.getLogger(UserServiceClient.class);
+
+    @Retry(name = "userServiceLookup", fallbackMethod = "getByIdFallback")
+    @CircuitBreaker(name = "userServiceLookup")
     @GetMapping("/api/v1/users/{id}")
     UserExistenceResponse getById(@PathVariable("id") UUID id);
+
+    /**
+     * Invoked once the Retry+CircuitBreaker chain above has given up on
+     * {@link #getById}: either every retry attempt failed, or the circuit was
+     * already OPEN and rejected the call instantly (Q46 — "shielding your
+     * thread pool" by never even attempting the call once tripped). Reaching
+     * this point means user-service itself is the problem, not the specific
+     * userId being looked up — {@code FeignException.NotFound} never arrives
+     * here (see class Javadoc), so every invocation of this fallback is a
+     * genuine, type-safe "can't tell you right now" rather than a
+     * misclassified "doesn't exist" (Q47).
+     */
+    default UserExistenceResponse getByIdFallback(UUID id, Throwable throwable) {
+        LOG.warn("user-service lookup fell back for userId={}: {}", id, throwable.toString());
+        throw new DownstreamServiceUnavailableException("user-service", throwable);
+    }
 }

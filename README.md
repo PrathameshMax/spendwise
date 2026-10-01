@@ -492,7 +492,73 @@ already failing), not something this milestone should reach ahead and solve.
 4. Revert the `Thread.sleep(5000)` line and rebuild user-service again before
    moving on.
 
-Next: Milestone 12 — Fault Isolation State Machines (Circuit Breakers).
+**Milestone 12 (Phase 2) complete** — Fault Isolation State Machines (Circuit Breakers).
+
+The roadmap scopes this one precisely to "the Transaction→User cross-service
+call" — singular, not both Milestone 10 consumers — so `@CircuitBreaker` is
+applied only to transaction-service's `UserServiceClient.getById`;
+budget-service's identical-looking copy keeps Milestone 11's
+Retry-with-timeouts protection only, unchanged. That scoping also decided
+where the new config lives: Milestone 11's timeouts/retry were centralized in
+config-repo/application.yml because they applied to *every* Feign client, but
+the circuit breaker policy (`resilience4j.circuitbreaker.instances.
+userServiceLookup`) sits in transaction-service's own application.yml instead,
+since implying it's a platform-wide default would be inaccurate.
+
+`sliding-window-size: 10` with `minimum-number-of-calls: 5` means a failure
+rate is only computed once at least 5 of the last 10 calls have actually
+happened — the first unlucky call can't trip the breaker off a 100%-of-1
+sample. `failure-rate-threshold: 50` opens the circuit once half of that
+window failed; `wait-duration-in-open-state: 10s` with
+`automatic-transition-from-open-to-half-open-enabled: true` means the circuit
+tries itself again on a timer (up to 3 trial calls,
+`permitted-number-of-calls-in-half-open-state`) rather than waiting for the
+next real caller to trigger that check.
+
+Stacking order mattered here in a way that isn't obvious from the annotations
+alone (Milestone 13 digs further into this): Resilience4j's default aspect
+order makes `@Retry` the *outer* layer and `@CircuitBreaker` the *inner* one,
+so each of Retry's attempts makes its own fresh pass through the circuit
+breaker. A `fallbackMethod` attached to the *inner* annotation would fire on
+every single attempt and silently swallow Retry's remaining attempts before
+they ever ran — so `fallbackMethod = "getByIdFallback"` is attached to
+`@Retry` instead, firing exactly once after the whole chain has had its say,
+whether that means "all retries exhausted" or "the circuit was already OPEN
+and rejected the call outright with `CallNotPermittedException`" (Q46).
+
+`getByIdFallback` throws a new, deliberately generic
+`DownstreamServiceUnavailableException` (spendwise-common — parameterized by
+service name like `ResourceNotFoundException` is by resource name, so any
+future circuit-breaker-protected call can reuse it), mapped to `503 Service
+Unavailable` through the same `AbstractGlobalExceptionHandler` every other
+`SpendWiseException` already uses — no new handler code needed. Getting this
+right required one correctness detail easy to miss: both the retry policy and
+the new circuit breaker policy exclude `feign.FeignException$NotFound` via
+their own `ignore-exceptions`. Without that, a perfectly healthy user-service
+correctly answering "no such user" would both count as a circuit-breaker
+failure *and* get misrouted through the fallback — turning a correct 404 into
+a false 503. A business answer is not a partial failure (Q47); only a
+genuinely broken or overloaded downstream should ever reach the fallback.
+
+🔥 **Chaos Lab — try it yourself:**
+1. In `user-service`'s `UserController.getById`, temporarily replace the
+   method body with `throw new RuntimeException("Simulated failure");` and
+   rebuild: `docker compose up -d --build user-service`.
+2. Fire a burst of concurrent requests at transaction-service through the
+   gateway — at least 5-10, to clear `minimum-number-of-calls`:
+   ```bash
+   for i in {1..15}; do
+     curl -s -o /dev/null -w "%{http_code}\n" -X POST http://localhost:8080/api/v1/transactions \
+       -H "Content-Type: application/json" \
+       -d "{\"userId\":\"<existing-id>\",\"categoryId\":\"<existing-id>\",\"amount\":5,\"type\":\"EXPENSE\",\"description\":\"chaos\",\"transactionDate\":\"2026-10-01\"}"
+   done
+   ```
+3. Watch `docker compose logs transaction-service --since 2m | grep -i "CircuitBreaker\|fell back"` — you'll see the circuit breaker's own state-transition log line (`CLOSED` → `OPEN`) around the point `failure-rate-threshold` is crossed, followed by `userServiceLookup` logging the fallback firing.
+4. Notice the later requests in the burst return `503` essentially instantly — no more waiting through 3 retry attempts each, since `CallNotPermittedException` short-circuits before any network call is even attempted. That's the thread-pool protection the roadmap calls out: once OPEN, transaction-service stops spending threads/connections on a downstream it already knows is failing.
+5. Stop sending traffic, wait past `wait-duration-in-open-state` (10s), then send one more request — the circuit moves to `HALF_OPEN` and lets it through as a trial call.
+6. Revert `UserController.getById` and rebuild user-service again before moving on.
+
+Next: Milestone 13 — The Full Resilience4j Suite (Bulkhead & TimeLimiter).
 
 ## API Versioning & Deprecation Policy
 

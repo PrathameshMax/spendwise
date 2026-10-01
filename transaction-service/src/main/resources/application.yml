@@ -22,3 +22,33 @@ management:
     web:
       exposure:
         include: health,info,refresh
+
+# Milestone 12 — scoped to this service only (not centralized in
+# config-repo/application.yml the way Milestone 11's timeouts/retry are):
+# the roadmap applies @CircuitBreaker specifically to "the Transaction→User
+# cross-service call," not budget-service's copy, so this policy belongs here
+# rather than implying it's a platform-wide default.
+resilience4j:
+  circuitbreaker:
+    instances:
+      userServiceLookup:
+        sliding-window-type: COUNT_BASED
+        # Of the last 10 calls, at least 5 must have actually happened
+        # (minimum-number-of-calls) before a failure rate is even computed —
+        # otherwise the very first unlucky call could trip the breaker off a
+        # 100%-of-1 sample.
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        # OPEN for 10s before a trial call is let through automatically
+        # (rather than waiting for the next caller to arrive and trigger the
+        # transition check), then up to 3 trial calls decide CLOSED vs OPEN
+        # again.
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+        # Same reasoning as the Retry ignore-exceptions above: a 404 is a
+        # correct, healthy answer from user-service, not a failure — it must
+        # never count against this circuit's failure-rate window.
+        ignore-exceptions:
+          - feign.FeignException$NotFound
