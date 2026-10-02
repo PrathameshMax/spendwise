@@ -232,7 +232,6 @@ services:
       # host too so grpcurl can be run directly against it per this
       # milestone's own validation steps, not only reachable from
       # analytics-service's own container-network address.
-      - "9090:9090"
     environment:
       DB_HOST: postgres
       CONFIG_SERVER_URL: http://config-server:8888
