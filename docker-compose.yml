@@ -227,6 +227,12 @@ services:
     container_name: spendwise-budget-service
     ports:
       - "8084:8084"
+      # Milestone 15 — the gRPC mirror of the REST summary endpoint
+      # (config-repo/budget-service.yml's grpc.server.port), exposed on the
+      # host too so grpcurl can be run directly against it per this
+      # milestone's own validation steps, not only reachable from
+      # analytics-service's own container-network address.
+      - "9090:9090"
     environment:
       DB_HOST: postgres
       CONFIG_SERVER_URL: http://config-server:8888
@@ -279,11 +285,25 @@ services:
     ports:
       - "8086:8086"
     environment:
+      # Milestone 15 — analytics-service gains real Postgres persistence
+      # (dashboard_query_log via R2DBC) for the first time; same ${VAR:localhost}
+      # override pattern DB_HOST has used for every other *_db-backed service
+      # since Milestone 4.
+      DB_HOST: postgres
       CONFIG_SERVER_URL: http://config-server:8888
       EUREKA_HOST: discovery-server
       MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
+      # Milestone 15 — overrides config-repo/analytics-service.yml's
+      # `localhost:9090` static gRPC target default with budget-service's own
+      # compose service name, the same *_SERVICE_HOST override pattern
+      # api-gateway's own Feign/HTTP routes have used since Milestone 9.
+      BUDGET_SERVICE_HOST: budget-service
     depends_on:
       config-server:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      budget-service:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:

@@ -1,3 +1,55 @@
 # Centralized configuration for analytics-service. Populated as later milestones (JPA,
 # security, Kafka, resilience) introduce properties that need to be
 # environment-driven.
+
+spring:
+  # Milestone 15 — this service's first real persistence, over Spring Data
+  # R2DBC rather than JPA: a reactive, non-blocking ConnectionFactory, kept
+  # entirely separate from Flyway's own JDBC connection just below — the two
+  # never share a connection pool, driver, or lifecycle. Same ${VAR:localhost}
+  # override pattern DB_HOST has used for every other *_db-backed service
+  # since Milestone 4.
+  r2dbc:
+    url: r2dbc:postgresql://${DB_HOST:localhost}:5432/analytics_db
+    username: ${DB_USERNAME:spendwise}
+    password: ${DB_PASSWORD:spendwise}
+  # Flyway has no R2DBC support at all — it only ever speaks JDBC — so these
+  # three properties are read directly by FlywayMigrationConfig's own manual
+  # bean (FlywayAutoConfiguration is excluded on AnalyticsServiceApplication;
+  # see that bean's Javadoc for why). Points at the exact same analytics_db
+  # database the r2dbc.url above does, just over a different, migration-only
+  # JDBC connection.
+  flyway:
+    url: jdbc:postgresql://${DB_HOST:localhost}:5432/analytics_db
+    user: ${DB_USERNAME:spendwise}
+    password: ${DB_PASSWORD:spendwise}
+
+# Milestone 15 — the gRPC client side of budget-service's BudgetSummaryService.
+# "budget-service" here is the @GrpcClient qualifier name
+# (BudgetSummaryGrpcClient), matching this property key, not a Eureka lookup —
+# this platform's net.devh client config uses the same static host:port
+# addressing its Feign/HTTP routes already use elsewhere (config-repo/
+# api-gateway.yml's own ${VAR:localhost} routes), rather than net.devh's
+# separate discovery:/// scheme, so this service's one new inter-service
+# dependency is addressed the same way every existing one already is.
+# negotiationType: PLAINTEXT matches budget-service's own default (TLS is
+# opt-in there via grpc.server.security.enabled, left unset) — see that
+# service's config-repo/budget-service.yml comment for why this is acceptable
+# only because the port never leaves the docker-compose network.
+grpc:
+  client:
+    budget-service:
+      address: static://${BUDGET_SERVICE_HOST:localhost}:9090
+      negotiationType: PLAINTEXT
+
+management:
+  endpoint:
+    health:
+      group:
+        readiness:
+          # Milestone 15 — Spring Boot Actuator's R2DBC auto-configuration
+          # registers its ConnectionFactory health check under the indicator
+          # name "r2dbc" (the reactive-stack counterpart of the JDBC-based "db"
+          # indicator every JPA-backed service's own readiness group already
+          # includes, e.g. budget-service's config-repo entry above).
+          include: readinessState,r2dbc

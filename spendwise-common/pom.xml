@@ -39,6 +39,22 @@
             <artifactId>spring-webmvc</artifactId>
             <scope>provided</scope>
         </dependency>
+        <!-- Milestone 15 — "provided" for the exact same reason as spring-webmvc above,
+             mirrored for the opposite stack: AbstractReactiveGlobalExceptionHandler and
+             the Reactive*Filter classes in tracing/security below extend/implement
+             WebFlux-only types (ResponseEntityExceptionHandler, WebFilter), but this must
+             never become a transitive dependency of every servlet-based service (budget-
+             service, auth-service, etc.), whose Tomcat-based runtime has no event-loop
+             Netty server and no use for Reactor's types at all. "provided" scope is not
+             transitive, so analytics-service — this platform's only WebFlux service, and
+             the only one that scans this package's reactive classes — is the one consumer
+             that must (and does, via spring-boot-starter-webflux) declare this dependency
+             itself for those classes to ever be loaded. -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-webflux</artifactId>
+            <scope>provided</scope>
+        </dependency>
         <!-- Milestone 8 — the custom @ValidCurrencyCode constraint and the OnCreate/OnUpdate
              validation-group marker interfaces live in this module (validation package) so
              every service shares one definition instead of each redeclaring its own currency

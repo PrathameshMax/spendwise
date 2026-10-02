@@ -1,0 +1,62 @@
+syntax = "proto3";
+
+// Milestone 15 — the Protobuf contract for the gRPC mirror of
+// BudgetController's existing `GET /api/v1/budgets/{userId}/summary` REST
+// endpoint, used for the roadmap's "low-latency, high-throughput internal
+// query" from Analytics Service and the REST-vs-gRPC payload/latency
+// benchmark (README's Milestone 15 Chaos Lab).
+//
+// Deliberately DUPLICATED verbatim into analytics-service/src/main/proto/
+// rather than placed in spendwise-common: this platform's own established
+// convention (since Milestone 10 — see budget-service's own
+// client/UserServiceClient.java and client/UserExistenceResponse.java) is
+// that a service consuming another service's contract defines its OWN,
+// independently-maintained copy of exactly what it needs, rather than
+// sharing contract types across services — spendwise-common is explicitly
+// reserved for cross-cutting infrastructure, never business/domain-shaped
+// contracts, precisely so each service's module can be extracted into its
+// own polyrepo without carrying a shared-contract dependency along with it.
+// A generated gRPC stub is no different in kind from a hand-written Feign
+// interface in this respect; it simply can't be hand-written, since the
+// wire format is codegen'd — so the .proto SOURCE is what gets duplicated
+// instead, and protobuf-maven-plugin in each service's own pom.xml compiles
+// its own copy independently. The two copies must be kept in sync by hand
+// if this contract ever changes — the same maintenance cost duplicating
+// UserExistenceResponse already carries, accepted for the same reason.
+package spendwise.grpc.budget;
+
+option java_multiple_files = true;
+option java_package = "com.spendwise.grpc.budget";
+
+// Mirrors BudgetController's own path/query parameters exactly
+// (userId path variable, periodMonth query parameter).
+message BudgetSummaryRequest {
+  string user_id = 1;
+  string period_month = 2; // "yyyy-MM", same format BudgetController's own @DateTimeFormat uses
+}
+
+// Mirrors BudgetResponse field-for-field. Monetary amounts are encoded as
+// `string` (exact decimal text, e.g. "150.00"), never a numeric protobuf
+// type: a `double`/`float` would silently reintroduce binary floating-point
+// rounding error for currency, and protobuf has no native decimal/BigDecimal
+// type — the same reasoning this platform never uses a float for money
+// anywhere else. This also keeps the REST-vs-gRPC payload comparison
+// honest: both wire formats encode the same amount as text, so the
+// benchmark measures encoding/transport efficiency, not a format change.
+message BudgetSummaryItem {
+  string id = 1;
+  string user_id = 2;
+  string category = 3;
+  string capped_amount = 4;
+  string current_spend = 5;
+  string period_month = 6;
+  string created_at = 7; // ISO-8601, matching Jackson's default Instant serialization
+}
+
+message BudgetSummaryResponse {
+  repeated BudgetSummaryItem items = 1;
+}
+
+service BudgetSummaryService {
+  rpc GetSummary(BudgetSummaryRequest) returns (BudgetSummaryResponse);
+}

@@ -1,6 +1,5 @@
 package com.spendwise.common.security;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpFilter;
@@ -9,13 +8,8 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
-import java.security.MessageDigest;
-import java.util.Base64;
 
 /**
  * Verifies the signed {@value UserContextConstants#HEADER_NAME} header the API
@@ -33,12 +27,13 @@ import java.util.Base64;
  * documented later scope, not part of Milestone 6's stated implementation; this
  * filter's only job is to make a verified identity available via
  * {@link UserContextHolder} when one is present.
+ *
+ * <p>The actual HMAC verification/parsing (Milestone 15) now lives in the
+ * shared {@link UserContextVerifier}, reused as-is by {@link ReactiveUserContextFilter}.
  */
 public class UserContextFilter extends HttpFilter {
 
     private static final Logger log = LoggerFactory.getLogger(UserContextFilter.class);
-    private static final String HMAC_ALGORITHM = "HmacSHA256";
-    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final String sharedSecret;
 
@@ -52,7 +47,7 @@ public class UserContextFilter extends HttpFilter {
         String header = request.getHeader(UserContextConstants.HEADER_NAME);
         if (header != null && !header.isBlank()) {
             try {
-                UserContextHolder.set(verifyAndParse(header));
+                UserContextHolder.set(UserContextVerifier.verifyAndParse(header, sharedSecret));
             } catch (GeneralSecurityException | IllegalArgumentException e) {
                 log.debug("Discarding invalid {} header: {}", UserContextConstants.HEADER_NAME, e.getMessage());
             }
@@ -63,34 +58,5 @@ public class UserContextFilter extends HttpFilter {
         } finally {
             UserContextHolder.clear();
         }
-    }
-
-    private UserContext verifyAndParse(String header) throws GeneralSecurityException {
-        int separator = header.indexOf('.');
-        if (separator < 0) {
-            throw new IllegalArgumentException("malformed user-context header");
-        }
-        String encodedPayload = header.substring(0, separator);
-        String encodedSignature = header.substring(separator + 1);
-
-        byte[] payloadBytes = Base64.getUrlDecoder().decode(encodedPayload);
-        byte[] expectedSignature = sign(payloadBytes);
-        byte[] providedSignature = Base64.getUrlDecoder().decode(encodedSignature);
-
-        if (!MessageDigest.isEqual(expectedSignature, providedSignature)) {
-            throw new IllegalArgumentException("signature mismatch");
-        }
-
-        try {
-            return MAPPER.readValue(payloadBytes, UserContext.class);
-        } catch (IOException e) {
-            throw new IllegalArgumentException("unparseable user-context payload", e);
-        }
-    }
-
-    private byte[] sign(byte[] payloadBytes) throws GeneralSecurityException {
-        Mac mac = Mac.getInstance(HMAC_ALGORITHM);
-        mac.init(new SecretKeySpec(sharedSecret.getBytes(StandardCharsets.UTF_8), HMAC_ALGORITHM));
-        return mac.doFinal(payloadBytes);
     }
 }
