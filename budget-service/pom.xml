@@ -163,6 +163,14 @@
             <artifactId>grpc-netty-shaded</artifactId>
             <scope>runtime</scope>
         </dependency>
+        <!-- grpc-java codegen still emits @javax.annotation.Generated (removed from
+     the JDK in Java 11); compile-time only, never packaged into the jar. -->
+        <dependency>
+            <groupId>javax.annotation</groupId>
+            <artifactId>javax.annotation-api</artifactId>
+            <version>1.3.2</version>
+            <scope>provided</scope>
+        </dependency>
     </dependencies>
 
     <build>
