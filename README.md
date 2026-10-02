@@ -1391,7 +1391,218 @@ patterns don't currently justify the switch.
    working cross-cutting code, not new business logic, so this is primarily a
    regression check that nothing silently broke in the extraction.
 
-Next: Milestone 16 — Atomic State Processing (The Transactional Outbox Pattern).
+**Milestone 16 complete** — Atomic State Processing: The Transactional Outbox
+Pattern. Three fixes were raised validating Milestone 15, all already applied
+directly on `main` before this milestone started (`2b79a62`: `javax.annotation
+-api` provided-scope dependency for grpc-java's generated `@Generated`
+annotation on Java 21; `87c87c0`: removed budget-service's colliding
+`"9090:9090"` host-port mapping against Prometheus's own pre-existing one;
+`cc81582`: fixed `UserContextPropagationGlobalFilter`'s `Mono<Void>`/
+`switchIfEmpty` misuse that invoked the downstream filter chain, and with it
+route proxying and the rate limiter, twice per request). This milestone
+builds on top of all three rather than re-deriving them. One further,
+non-functional fix folds in here too: `docker-compose.yml`'s comment above
+budget-service's gRPC port block still described host-reachable gRPC after
+`87c87c0` removed the line that provided it — corrected, and the port is
+republished as `"9095:9090"` (host 9095, container port unchanged at 9090) so
+gRPC stays reachable from the host for this milestone's own Postman-based
+validation, on a host port confirmed free against every other mapping in this
+file.
+
+Scoped exactly to the roadmap's own two sentences: the write path from
+Milestone 1 (`POST /api/v1/transactions`) now also writes a durable,
+queryable outbox row in the same local database transaction as the
+`Transaction` row itself — nothing else. No Kafka broker, producer, or
+consumer exists anywhere on this platform yet; that is Milestone 17's own
+scope, confirmed directly against the locked roadmap's Milestone 13-20 text
+before writing a line of this milestone's code, specifically to avoid the
+overreach of building a producer or a consumer this milestone doesn't ask
+for. `TransactionCreatedEvent` is created now, ahead of any consumer, only
+because the roadmap itself names it ahead of its own Milestone 17/19 uses.
+
+**`V4__create_outbox_events_table.sql`** (new,
+`transaction-service/.../db/migration`) adds `outbox_events`
+(`id`, `aggregate_type`, `aggregate_id`, `event_type`, `payload`,
+`created_at`, `processed_at`) plus a partial index,
+`idx_outbox_events_unprocessed`, on `created_at` filtered to
+`processed_at IS NULL` — the exact "find unprocessed rows, oldest first"
+access pattern a future poller needs, present now because it is this table's
+own natural index, not a piece of Milestone 17 built early. The column shape
+itself is not invented for this platform: it matches Debezium's own
+documented "outbox event router" convention (`aggregate_type`/`aggregate_id`
+identify *what* changed, independently of *what kind* of event it was),
+chosen so this table's shape means the same thing here as it does everywhere
+else this pattern is used.
+
+**`OutboxEvent`** (new, `domain`) is the JPA entity over that table —
+`GenerationType.UUID` for its own `id` (application-assigned, same
+convention `Transaction`/`Category`/`Budget` already use on this platform's
+JPA-backed services), a protected no-arg constructor JPA requires, and a
+public four-argument constructor (`aggregateType`, `aggregateId`,
+`eventType`, `payload`) that stamps `createdAt = Instant.now()` itself so
+every caller gets a consistent timestamp without having to supply one.
+`processedAt` is mapped but written by nothing in this milestone — the
+column, and the getter for it, exist now because they are this row's own
+fields, not because the poller that will eventually set them is being built
+ahead of schedule. **`OutboxEventRepository`** (new, `domain`) is a bare
+`JpaRepository<OutboxEvent, UUID>` with no custom query methods — this
+milestone only ever calls `save(...)`; a `findUnprocessed(...)`-shaped query
+method belongs to Milestone 17's poller, which is the thing that would
+actually call it.
+
+**`TransactionCreatedEvent`** (new, its own `event` package,
+`transaction-service`) is a plain record — `transactionId`, `userId`,
+`categoryId`, `amount`, `type`, `transactionDate`, `currency`,
+`baseCurrencyAmount`, `createdAt` — carrying everything a future consumer
+would need without having to call back into transaction-service for it. It
+is deliberately *not* a member of a sealed-interface event hierarchy the
+roadmap's own notes sketch for later listener-side pattern matching: no
+listener exists anywhere on this platform yet to pattern-match against, so
+building that hierarchy now would itself be exactly the kind of unrequested
+substep this milestone's scope doesn't ask for — it arrives the milestone a
+real consumer needs it. It is also deliberately local to transaction-service,
+not `spendwise-common`: this platform's own established convention since
+Milestone 10 (`UserExistenceResponse`) and reaffirmed at Milestone 15 (the
+duplicated `budget_summary.proto`) keeps `spendwise-common` free of
+business/domain-shaped contracts, reserving it for cross-cutting
+infrastructure only.
+
+**`TransactionService`** (modified, `service`) gets the one behavioral
+change this milestone makes: `create(...)` now calls a new private
+`recordOutboxEvent(Transaction saved)` immediately after
+`transactionRepository.save(...)`, still inside the same `@Transactional`
+method — the entire point, since a crash between two separately-committed
+writes to two different systems (Postgres and, eventually, Kafka) is exactly
+the dual-write antipattern this pattern removes (`OutboxEvent`'s own Javadoc
+carries the full failure-mode walkthrough). `recordOutboxEvent` builds a
+`TransactionCreatedEvent` from the just-saved `Transaction`, serializes it
+with the already-autoconfigured `ObjectMapper` (new constructor dependency),
+and saves an `OutboxEvent` row with `aggregateType = "Transaction"`,
+`aggregateId = saved.getId()`, `eventType = "TransactionCreatedEvent"`. The
+checked `JsonProcessingException` `ObjectMapper#writeValueAsString` can throw
+is caught and rethrown as an unchecked `IllegalStateException`: every field
+on `TransactionCreatedEvent` is a Jackson-trivial type (UUID, `BigDecimal`,
+an enum, a date/instant) with no custom serializer that could actually fail
+for this payload shape, so this is the programming-error case, not a
+recoverable business outcome — not worth adding a checked exception to this
+method's (and in turn `TransactionController#create`'s) signature for a
+failure mode that cannot occur here.
+
+**`docker-compose.yml`** (modified) — the budget-service gRPC port
+correction described above; no other service's configuration changes, since
+this milestone adds no new infrastructure dependency (no new database, no
+new container, no new environment variable).
+
+**Q56: How does the Transactional Outbox pattern solve the dual-write
+problem, and what delivery guarantee does it actually provide?** The
+dual-write problem is that "commit to the database" and "publish to a
+message broker" are two separate operations against two unrelated systems
+with no shared transaction — there is no way to make them atomic, so a crash
+between them either loses the event (DB commits, the broker call never
+happens or fails) or fabricates one with nothing behind it (the broker call
+succeeds, the DB transaction then rolls back). The outbox pattern sidesteps
+this by never making the broker call from inside the business transaction at
+all: it writes a second, local row — this milestone's `outbox_events` —
+describing the event, in the exact same `@Transactional` boundary as the
+business write, so the two commit together or neither does; "did this event
+really happen" becomes a question the local database transaction alone can
+answer. A separate process (Milestone 17's outbox-publisher poller, not
+built in this milestone) later scans this table for unprocessed rows and
+publishes each one to Kafka, marking it processed only on broker
+acknowledgment. That poller can crash, retry, or be redeployed at any point
+without losing an event — it will simply find the same unprocessed row again
+next time it scans — which is what makes this **at-least-once** delivery,
+not exactly-once: a poller that publishes successfully but crashes before
+marking the row processed will republish it on its next pass, so a
+downstream consumer must itself be idempotent against redelivery (the
+platform's own roadmap names this exact concern at Milestone 19's
+idempotency layer).
+
+### Validating Milestone 16
+
+This milestone adds no new REST endpoint and no new request field — the
+write that matters is the existing `POST /api/v1/transactions`, now also
+writing an `outbox_events` row behind the scenes. Starting with this
+milestone, validation runs through Postman against containers you start
+yourself, not copy-pasted shell one-liners: the commands below are only for
+starting the containers and for the one check Postman itself cannot do
+(looking directly at a database row).
+
+1. **Rebuild and start the stack**, in Git Bash:
+   ```bash
+   cd /d/spendwise
+   docker compose up -d --build transaction-service
+   docker compose logs transaction-service --since 2m | grep -iE "flyway|error"
+   ```
+   Confirm the log shows `V4__create_outbox_events_table.sql` applied
+   successfully, with no errors. If this is a fresh volume, every other
+   service needs to be up too for the flows below to work end to end —
+   `docker compose up -d --build` with no service name rebuilds and starts
+   everything.
+
+2. **Import the Postman collection** — `postman/SpendWise.postman_collection.json`
+   from the repo (Postman: File → Import → select the file). This is the
+   same collection every milestone since Milestone 5 has shipped and
+   extended, not a new one-off file: Milestone 16 only adds a Tests script to
+   three existing requests (auto-capturing `userId`, `categoryId`, and the
+   new `transactionId` collection variable from each response, so no id ever
+   needs hand-copying between requests) and documents the outbox write on
+   the existing **Create Transaction** request's own description. Run, in
+   order, from the collection:
+   - **Auth Service → Business Endpoints → Register** (or **Login** if that
+     email is already registered) — mints `accessToken`, though nothing
+     below actually requires it, since transaction-service and user-service
+     accept direct requests unauthenticated (only the Gateway enforces the
+     JWT, per `RouteConfig`'s own design) — included so the flow still
+     matches how a real client reaches this platform.
+   - **User Service → Business Endpoints → Create User** — sets `userId`.
+   - **Transaction Service → Business Endpoints → Create Category** — sets
+     `categoryId`.
+   - **Transaction Service → Business Endpoints → Create Transaction** — the
+     request this milestone actually changes the behavior of. A `201` here
+     means the `Transaction` row was written; it does **not** by itself
+     prove the outbox row was written too — that is step 3.
+   - **Transaction Service → Business Endpoints → List Transactions
+     (filtered + paginated)** — confirms the transaction reads back.
+
+3. **Confirm the outbox row itself exists** — the one step Postman cannot
+   do, since this milestone deliberately adds no REST endpoint over
+   `outbox_events` (see `OutboxEvent`'s own Javadoc for why: nothing reads
+   this table yet, so an endpoint over it would have nothing real to expose).
+   In Git Bash:
+   ```bash
+   docker exec -it spendwise-postgres psql -U spendwise -d transaction_db -c "SELECT id, aggregate_type, aggregate_id, event_type, processed_at FROM outbox_events ORDER BY created_at DESC LIMIT 5;"
+   ```
+   What this does, plainly: `docker exec -it spendwise-postgres` opens an
+   interactive session inside the already-running Postgres container (no
+   separate SQL client install needed — `psql` ships inside that container's
+   own image); `-U spendwise -d transaction_db` connects as the `spendwise`
+   user to transaction-service's own database (same user/database this
+   service itself connects as, from `docker-compose.yml`); the `-c "..."`
+   is the one SQL statement actually being run, asking Postgres to show the
+   five most recent outbox rows. Expect one row whose `aggregate_id` matches
+   the `id` the Create Transaction response returned (visible in Postman's
+   own response pane, or as `{{transactionId}}` under the collection's
+   Variables tab), `event_type = TransactionCreatedEvent`, and
+   `processed_at` = `NULL` — unprocessed, exactly as expected, since no
+   poller exists yet to mark it otherwise. If a GUI is preferred over this
+   one command, any Postgres client (DBeaver, TablePlus, pgAdmin) can
+   connect to `localhost:5432`, database `transaction_db`, user/password
+   `spendwise`/`spendwise` (both published to the host already, per
+   `docker-compose.yml`) and browse the `outbox_events` table directly
+   instead.
+
+4. **Confirm the atomicity itself, not just the happy path** — send a
+   **Create Transaction** request with an intentionally-invalid `categoryId`
+   (any random UUID). Expect a `404` (`ResourceNotFoundException`), then
+   re-run step 3's query and confirm **no new row** was added to
+   `outbox_events` either — proving the outbox write and the business write
+   really do share one transaction: a failure before the method returns
+   rolls both back together, not just the one that happened to run first.
+
+Next: Milestone 17 — Decoupled Processing & Message-Driven Architecture
+(Kafka Producer/Consumer, the outbox-publisher poller that finally reads this
+milestone's table).
 
 ## API Versioning & Deprecation Policy
 

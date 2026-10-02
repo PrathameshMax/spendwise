@@ -227,11 +227,18 @@ services:
     container_name: spendwise-budget-service
     ports:
       - "8084:8084"
-      # Milestone 15 — the gRPC mirror of the REST summary endpoint
-      # (config-repo/budget-service.yml's grpc.server.port), exposed on the
-      # host too so grpcurl can be run directly against it per this
-      # milestone's own validation steps, not only reachable from
-      # analytics-service's own container-network address.
+      # Milestone 15 fix (made validating that milestone) — this block
+      # originally published the gRPC port (grpc.server.port, config-repo/
+      # budget-service.yml) onto host 9090, which collided with Prometheus's
+      # own "9090:9090" above and was removed. Milestone 16 republishes it on
+      # host 9095 instead (container port unchanged at 9090 — only the host
+      # side is remapped) so Postman/grpcurl can reach it directly from the
+      # host for manual validation, the same way every REST port here already
+      # is; analytics-service itself is unaffected either way, since it
+      # always addressed this over the compose network as
+      # budget-service:9090 (config-repo/analytics-service.yml), never via a
+      # host port.
+      - "9095:9090"
     environment:
       DB_HOST: postgres
       CONFIG_SERVER_URL: http://config-server:8888

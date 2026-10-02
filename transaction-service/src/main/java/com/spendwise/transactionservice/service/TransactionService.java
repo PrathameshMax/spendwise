@@ -1,5 +1,7 @@
 package com.spendwise.transactionservice.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.spendwise.common.exception.ResourceNotFoundException;
 import com.spendwise.transactionservice.api.CreateTransactionRequest;
 import com.spendwise.transactionservice.api.TransactionFilter;
@@ -9,9 +11,12 @@ import com.spendwise.transactionservice.client.ExchangeRateClient;
 import com.spendwise.transactionservice.client.UserExistenceResponse;
 import com.spendwise.transactionservice.domain.Category;
 import com.spendwise.transactionservice.domain.CategoryRepository;
+import com.spendwise.transactionservice.domain.OutboxEvent;
+import com.spendwise.transactionservice.domain.OutboxEventRepository;
 import com.spendwise.transactionservice.domain.Transaction;
 import com.spendwise.transactionservice.domain.TransactionRepository;
 import com.spendwise.transactionservice.domain.TransactionSpecifications;
+import com.spendwise.transactionservice.event.TransactionCreatedEvent;
 import com.spendwise.transactionservice.mapper.TransactionMapper;
 import feign.FeignException;
 import org.springframework.data.domain.Page;
@@ -27,22 +32,30 @@ import java.util.concurrent.CompletionException;
 @Service
 public class TransactionService {
 
+    private static final String AGGREGATE_TYPE_TRANSACTION = "Transaction";
+
     private final TransactionRepository transactionRepository;
     private final CategoryRepository categoryRepository;
+    private final OutboxEventRepository outboxEventRepository;
     private final TransactionMapper transactionMapper;
     private final AsyncUserServiceLookup asyncUserServiceLookup;
     private final ExchangeRateClient exchangeRateClient;
+    private final ObjectMapper objectMapper;
 
     public TransactionService(TransactionRepository transactionRepository,
                                CategoryRepository categoryRepository,
+                               OutboxEventRepository outboxEventRepository,
                                TransactionMapper transactionMapper,
                                AsyncUserServiceLookup asyncUserServiceLookup,
-                               ExchangeRateClient exchangeRateClient) {
+                               ExchangeRateClient exchangeRateClient,
+                               ObjectMapper objectMapper) {
         this.transactionRepository = transactionRepository;
         this.categoryRepository = categoryRepository;
+        this.outboxEventRepository = outboxEventRepository;
         this.transactionMapper = transactionMapper;
         this.asyncUserServiceLookup = asyncUserServiceLookup;
         this.exchangeRateClient = exchangeRateClient;
+        this.objectMapper = objectMapper;
     }
 
     @Transactional
@@ -65,7 +78,55 @@ public class TransactionService {
                 request.currency(),
                 baseCurrencyAmount));
 
+        recordOutboxEvent(saved);
+
         return transactionMapper.toResponse(saved);
+    }
+
+    /**
+     * Milestone 16 — the second write of the Transactional Outbox pattern,
+     * inside the same {@code @Transactional} boundary as
+     * {@code transactionRepository.save(...)} above: both commit together or
+     * neither does, which is the entire point (see {@link OutboxEvent}'s own
+     * Javadoc for why a direct, separate call to a message broker here would
+     * be the dual-write antipattern this milestone removes). No Kafka
+     * producer is called — none exists on this platform yet (Milestone 17) —
+     * this method's only job is to make the event durable and discoverable
+     * for that future poller, not to deliver it anywhere.
+     *
+     * <p>{@code JsonProcessingException} is a checked exception on
+     * {@code ObjectMapper#writeValueAsString}, but every field on
+     * {@link TransactionCreatedEvent} is a Jackson-trivial type (UUID,
+     * BigDecimal, an enum, a date/instant) with no custom serializer to fail
+     * — treated here as the programming-error case it would actually be,
+     * not a recoverable business outcome, hence the unchecked wrap rather
+     * than adding a checked exception to this method's (and in turn
+     * {@code TransactionController#create}'s) signature for a failure mode
+     * that cannot occur for this payload shape.
+     */
+    private void recordOutboxEvent(Transaction saved) {
+        TransactionCreatedEvent event = new TransactionCreatedEvent(
+                saved.getId(),
+                saved.getUserId(),
+                saved.getCategory().getId(),
+                saved.getAmount(),
+                saved.getType(),
+                saved.getTransactionDate(),
+                saved.getCurrency(),
+                saved.getBaseCurrencyAmount(),
+                saved.getCreatedAt());
+
+        try {
+            outboxEventRepository.save(new OutboxEvent(
+                    AGGREGATE_TYPE_TRANSACTION,
+                    saved.getId(),
+                    TransactionCreatedEvent.class.getSimpleName(),
+                    objectMapper.writeValueAsString(event)));
+        } catch (JsonProcessingException ex) {
+            throw new IllegalStateException(
+                    "Failed to serialize " + TransactionCreatedEvent.class.getSimpleName()
+                            + " for transaction " + saved.getId(), ex);
+        }
     }
 
     /**
