@@ -39,8 +39,25 @@ spring:
 grpc:
   client:
     budget-service:
-      address: static://${BUDGET_SERVICE_HOST:localhost}:9090
+      # Milestone 17 fix — dns:/// replaces static://. net.devh's static
+      # resolver resolves the host once, when the channel is built, so after
+      # budget-service was recreated with a new container IP this channel kept
+      # dialling the old one until analytics-service itself was restarted.
+      # grpc-java's DNS resolver re-resolves when connections fail, so a
+      # restarted budget-service is picked up again (within the JVM's ~30s
+      # positive DNS cache). Same host/port, same plaintext negotiation.
+      address: dns:///${BUDGET_SERVICE_HOST:localhost}:9090
       negotiationType: PLAINTEXT
+
+# Milestone 17 fix — per-call gRPC deadline for BudgetSummaryGrpcClient. A
+# budget summary is a single indexed query on budget-service's side; 2s is
+# generous for that while still bounding a hung dependency well below any
+# client's own HTTP timeout. Exceeding it surfaces as DEADLINE_EXCEEDED and
+# is returned to the caller as a 503.
+spendwise:
+  grpc:
+    budget-service:
+      deadline: 2s
 
 management:
   endpoint:

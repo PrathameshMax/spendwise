@@ -13,13 +13,21 @@ spendwise:
       user-service: http://${USER_SERVICE_HOST:localhost}:8082
       transaction-service: http://${TRANSACTION_SERVICE_HOST:localhost}:8083
       budget-service: http://${BUDGET_SERVICE_HOST:localhost}:8084
-      # notification-service and analytics-service have no business routes above yet
-      # (Milestones 19 and 15 respectively) — these two entries exist solely so
-      # RouteConfig's Milestone 7 docs-proxy loop can expose their (currently
-      # near-empty) OpenAPI document too, matching "wire springdoc into every
-      # service." Do not add business path routes for them until those milestones.
+      # notification-service has no business route (its first inbound path is a
+      # Kafka listener); its entry exists so RouteConfig's docs-proxy loop can
+      # expose its OpenAPI document. analytics-service got its business route
+      # (/api/v1/analytics/**) in the Milestone 17 fix — Milestone 15 added the
+      # endpoint but not the route.
       notification-service: http://${NOTIFICATION_SERVICE_HOST:localhost}:8085
       analytics-service: http://${ANALYTICS_SERVICE_HOST:localhost}:8086
+  # Milestone 17 fix — how many proxies in front of the Gateway append to
+  # X-Forwarded-For (RateLimitConfig#clientKeyResolver). 1 = one load balancer
+  # in front, which is the deployment this setting assumes. With the Gateway
+  # exposed directly (docker compose on a laptop, nothing in front), every
+  # X-Forwarded-For value is client-supplied; set this to 0 there to key
+  # anonymous traffic on the socket address only.
+  rate-limit:
+    trusted-proxy-hops: 1
   security:
     jwk-set-uri: http://${AUTH_SERVICE_HOST:localhost}:8081/oauth2/jwks
     refresh-cookie-name: spendwise_refresh_token
@@ -65,6 +73,13 @@ spring:
       # containerized — exactly like every *_SERVICE_HOST override above.
       host: ${REDIS_HOST:localhost}
       port: 6379
+      # Milestone 17 fix — 1000ms -> 200ms, plus connect-timeout. A rate-limit
+      # check is one Lua EVAL against a co-located Redis (sub-millisecond when
+      # healthy), so 200ms is still ~100x headroom while capping what a
+      # degraded Redis can add to every request. Together with Lettuce's
+      # REJECT_COMMANDS (RateLimitConfig#rejectCommandsWhileDisconnected),
+      # which handles the fully-down case without waiting at all.
+      connect-timeout: 200ms
       # Explicit, same "never trust an external dependency without a bound"
       # reasoning as every other I/O timeout in this platform (Milestone
       # 11's Feign defaults, Milestone 13's exchange-rate WebClient): a
@@ -73,7 +88,7 @@ spring:
       # struggling Redis queues every gated request behind it instead of
       # either allowing or denying them promptly — a real, reported failure
       # mode (spring-cloud/spring-cloud-gateway#3373), not a hypothetical one.
-      timeout: 1000ms
+      timeout: 200ms
   # Milestone 14 fix (caught validating Milestone 14 itself, before any
   # pending-fixes list even came into it) — spring.cloud.gateway.default-
   # filters used to carry a RequestRateLimiter entry here

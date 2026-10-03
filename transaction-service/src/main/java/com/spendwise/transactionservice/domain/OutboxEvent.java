@@ -39,10 +39,12 @@ import java.util.UUID;
  * own id) independently of what kind of event it was, which matters the
  * moment this table ever carries more than one event type.
  *
- * <p>{@code processed_at} is written by nothing in this milestone — it exists
- * on this entity (and the table) now because the column is this row's own,
- * not because Milestone 17's poller is being built early; every row this
- * milestone writes stays unprocessed (`null`) until that poller exists.
+ * <p>{@code processed_at} is set by Milestone 17's
+ * {@code com.spendwise.transactionservice.outbox.OutboxPublisher}, through
+ * {@link #markProcessed(Instant)}, only after the Kafka broker has acknowledged
+ * the record (acks=all) — never before. {@code correlation_id} (Milestone 17,
+ * V5 migration) carries the originating request's {@code X-Correlation-ID}
+ * across the asynchronous gap between this row's write and its later publish.
  */
 @Entity
 @Table(name = "outbox_events")
@@ -70,16 +72,30 @@ public class OutboxEvent {
     @Column(name = "processed_at")
     private Instant processedAt;
 
+    @Column(name = "correlation_id", length = 64)
+    private String correlationId;
+
     protected OutboxEvent() {
         // required by JPA
     }
 
-    public OutboxEvent(String aggregateType, UUID aggregateId, String eventType, String payload) {
+    public OutboxEvent(String aggregateType, UUID aggregateId, String eventType, String payload,
+                       String correlationId) {
         this.aggregateType = aggregateType;
         this.aggregateId = aggregateId;
         this.eventType = eventType;
         this.payload = payload;
+        this.correlationId = correlationId;
         this.createdAt = Instant.now();
+    }
+
+    /**
+     * Called only after the broker has acknowledged this row's record. The
+     * entity is managed inside the publisher's transaction, so dirty checking
+     * flushes this as an UPDATE at commit — no explicit save needed.
+     */
+    public void markProcessed(Instant acknowledgedAt) {
+        this.processedAt = acknowledgedAt;
     }
 
     public UUID getId() {
@@ -108,5 +124,9 @@ public class OutboxEvent {
 
     public Instant getProcessedAt() {
         return processedAt;
+    }
+
+    public String getCorrelationId() {
+        return correlationId;
     }
 }

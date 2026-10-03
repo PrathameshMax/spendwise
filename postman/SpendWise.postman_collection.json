@@ -64,6 +64,31 @@
       "key": "transactionId",
       "value": "",
       "description": "Set automatically by Create Transaction's Tests script."
+    },
+    {
+      "key": "accessTokenB",
+      "value": "",
+      "description": "Milestone 17 test plan: second user's token (set by 0.2 Register user B)."
+    },
+    {
+      "key": "correlationId",
+      "value": "",
+      "description": "Milestone 17 test plan: X-Correlation-ID sent on 1.1, to find its Kafka record."
+    },
+    {
+      "key": "today",
+      "value": "",
+      "description": "Set by pre-request scripts: today's date, yyyy-MM-dd."
+    },
+    {
+      "key": "periodMonth",
+      "value": "",
+      "description": "Set by pre-request scripts: current month, yyyy-MM."
+    },
+    {
+      "key": "count429",
+      "value": "",
+      "description": "Milestone 17 test plan: 429s counted across a Runner burst."
     }
   ],
   "item": [
@@ -2318,6 +2343,793 @@
         }
       ],
       "description": "No business endpoints yet \u2014 CQRS read-model projections arrive at Milestone 23, and the service itself is rebuilt on WebFlux + R2DBC at Milestone 15. Actuator is already live since it's one of the 5 REST-capable services from Milestone 3."
+    },
+    {
+      "name": "Milestone 17 - Test Plan",
+      "description": "Run the folders in order. Every request goes through the API Gateway ({{apiGatewayUrl}}), as a real client would. Each request's Tests tab asserts the expected status and body; the Test Results tab shows pass/fail. Folders 4 and 6 are meant to be run with the Collection Runner (right-click the folder > Run folder, Iterations 60, Delay 0) so the burst arrives faster than the 10 tokens/s refill. Steps that need a container stopped or started say so in their description; those are the only terminal steps.",
+      "item": [
+        {
+          "name": "0. Setup",
+          "description": "Creates two users and a category. Run once per session.",
+          "item": [
+            {
+              "name": "0.1 Register user A (via Gateway)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/api/v1/auth/register",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "auth",
+                    "register"
+                  ]
+                },
+                "description": "Fresh email per run (timestamp), so this never collides with an earlier run.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"m17-a-{{$timestamp}}@spendwise.dev\",\n  \"rawPassword\": \"ChangeMe123!\"\n}"
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                      "pm.collectionVariables.set('accessToken', pm.response.json().accessToken);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "0.2 Register user B (via Gateway)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/api/v1/auth/register",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "auth",
+                    "register"
+                  ]
+                },
+                "description": "Second identity, used to prove rate-limit buckets are per user (folder 5).",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"m17-b-{{$timestamp}}@spendwise.dev\",\n  \"rawPassword\": \"ChangeMe123!\"\n}"
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                      "pm.collectionVariables.set('accessTokenB', pm.response.json().accessToken);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "0.3 Create user profile (via Gateway)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/api/v1/users",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "users"
+                  ]
+                },
+                "description": "user-service profile; its id is the userId every transaction needs.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"m17-profile-{{$timestamp}}@spendwise.dev\",\n  \"fullName\": \"Milestone 17 Tester\",\n  \"preferredCurrency\": \"INR\"\n}"
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                      "pm.collectionVariables.set('userId', pm.response.json().id);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "0.4 Create category (via Gateway)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/api/v1/categories",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "categories"
+                  ]
+                },
+                "description": "Category for the transactions below.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"M17 Groceries {{$timestamp}}\"\n}"
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                      "pm.collectionVariables.set('categoryId', pm.response.json().id);"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "1. Outbox to Kafka",
+          "description": "The Milestone 17 path: the outbox row written by 1.1 is published to transaction-events by OutboxPublisher within about a second. Verify the Kafka side in Kafka UI (http://localhost:8090 > Topics > transaction-events > Messages): one message whose Key is {{transactionId}}, with headers eventType=TransactionCreatedEvent, aggregateType=Transaction, outboxEventId, X-Correlation-ID={{correlationId}} and traceparent. Topics > transaction-events > Overview shows 3 partitions, replication factor 3.",
+          "item": [
+            {
+              "name": "1.1 Create transaction (writes outbox row)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  },
+                  {
+                    "key": "X-Correlation-ID",
+                    "value": "{{correlationId}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/api/v1/transactions",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "transactions"
+                  ]
+                },
+                "description": "Sends an explicit X-Correlation-ID so the resulting Kafka record can be found by it. Expect 201; the record should be on the topic within ~1-2 s.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"userId\": \"{{userId}}\",\n  \"categoryId\": \"{{categoryId}}\",\n  \"amount\": 450.75,\n  \"type\": \"EXPENSE\",\n  \"description\": \"Milestone 17 outbox to Kafka\",\n  \"transactionDate\": \"{{today}}\",\n  \"currency\": \"INR\"\n}"
+                }
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const now = new Date();",
+                      "pm.collectionVariables.set('today', now.toISOString().slice(0, 10));",
+                      "pm.collectionVariables.set('periodMonth', now.toISOString().slice(0, 7));",
+                      "pm.collectionVariables.set('correlationId', 'm17-' + pm.variables.replaceIn('{{$guid}}'));"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                      "pm.collectionVariables.set('transactionId', pm.response.json().id);",
+                      "pm.test('Gateway echoes the correlation id', () => pm.expect(pm.response.headers.get('X-Correlation-ID')).to.eql(pm.collectionVariables.get('correlationId')));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "1.2 List transactions (read back)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/api/v1/transactions?userId={{userId}}&page=0&size=20",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "transactions"
+                  ],
+                  "query": [
+                    {
+                      "key": "userId",
+                      "value": "{{userId}}"
+                    },
+                    {
+                      "key": "page",
+                      "value": "0"
+                    },
+                    {
+                      "key": "size",
+                      "value": "20"
+                    }
+                  ]
+                },
+                "description": "The business row is readable through the normal REST path."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                      "pm.test('1.1 transaction is listed', () => pm.expect(pm.response.json().content.map(t => t.id)).to.include(pm.collectionVariables.get('transactionId')));"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "2. Kafka outage - writes keep working",
+          "description": "Before 2.1: stop all three brokers (terminal: docker compose stop kafka-1 kafka-2 kafka-3). 2.1 must still return 201: the event waits in outbox_events with processed_at = NULL, and transaction-service logs 'Outbox event ... not acknowledged, will retry next poll' every few seconds ('Kafka cluster unreachable' instead, if the topic had not been provisioned yet). Then start the brokers again (docker compose start kafka-1 kafka-2 kafka-3); within ~30 s the message for {{transactionId}} appears in Kafka UI and processed_at is set. Variant: stop only kafka-3 \u2014 2.1 is still published immediately (2 of 3 replicas satisfy min.insync.replicas=2).",
+          "item": [
+            {
+              "name": "2.1 Create transaction while Kafka is down",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  },
+                  {
+                    "key": "X-Correlation-ID",
+                    "value": "{{correlationId}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/api/v1/transactions",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "transactions"
+                  ]
+                },
+                "description": "Expect 201 even with every broker stopped.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"userId\": \"{{userId}}\",\n  \"categoryId\": \"{{categoryId}}\",\n  \"amount\": 99.0,\n  \"type\": \"EXPENSE\",\n  \"description\": \"Written while Kafka was down\",\n  \"transactionDate\": \"{{today}}\",\n  \"currency\": \"INR\"\n}"
+                }
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const now = new Date();",
+                      "pm.collectionVariables.set('today', now.toISOString().slice(0, 10));",
+                      "pm.collectionVariables.set('periodMonth', now.toISOString().slice(0, 7));",
+                      "pm.collectionVariables.set('correlationId', 'm17-outage-' + pm.variables.replaceIn('{{$guid}}'));"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('201 Created with Kafka down', () => pm.response.to.have.status(201));",
+                      "pm.collectionVariables.set('transactionId', pm.response.json().id);"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "3. gRPC deadline and 503 mapping (fix 1)",
+          "description": "3.1 with everything up. 3.2 after docker compose stop budget-service (UNAVAILABLE). 3.3 after docker compose start budget-service, wait for it to be healthy and ~30 s more (analytics-service re-resolves budget-service's new container address), then docker compose pause budget-service (the process is frozen, so the call can only end by deadline: DEADLINE_EXCEEDED). Finish with docker compose unpause budget-service. 3.1 also proves the analytics-service Gateway route added in this milestone.",
+          "item": [
+            {
+              "name": "3.1 Dashboard via Gateway - budget-service up",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/api/v1/analytics/dashboard/{{userId}}?periodMonth={{periodMonth}}",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "analytics",
+                    "dashboard",
+                    "{{userId}}"
+                  ],
+                  "query": [
+                    {
+                      "key": "periodMonth",
+                      "value": "{{periodMonth}}"
+                    }
+                  ]
+                },
+                "description": "Expect 200 with the summary (empty items is fine: no budgets created)."
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const now = new Date();",
+                      "pm.collectionVariables.set('today', now.toISOString().slice(0, 10));",
+                      "pm.collectionVariables.set('periodMonth', now.toISOString().slice(0, 7));"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                      "pm.test('items array present', () => pm.expect(pm.response.json().items).to.be.an('array'));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "3.2 Dashboard - budget-service stopped (UNAVAILABLE)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/api/v1/analytics/dashboard/{{userId}}?periodMonth={{periodMonth}}",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "analytics",
+                    "dashboard",
+                    "{{userId}}"
+                  ],
+                  "query": [
+                    {
+                      "key": "periodMonth",
+                      "value": "{{periodMonth}}"
+                    }
+                  ]
+                },
+                "description": "Expect 503 ProblemDetail quickly (connection refused / name not resolvable)."
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const now = new Date();",
+                      "pm.collectionVariables.set('today', now.toISOString().slice(0, 10));",
+                      "pm.collectionVariables.set('periodMonth', now.toISOString().slice(0, 7));"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('503 Service Unavailable', () => pm.response.to.have.status(503));",
+                      "const p = pm.response.json();",
+                      "pm.test('ProblemDetail errorCode DOWNSTREAM_SERVICE_UNAVAILABLE', () => pm.expect(p.errorCode).to.eql('DOWNSTREAM_SERVICE_UNAVAILABLE'));",
+                      "pm.test('detail names budget-service', () => pm.expect(p.detail).to.include('budget-service'));",
+                      "pm.test('fails within the 2s deadline', () => pm.expect(pm.response.responseTime).to.be.below(3000));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "3.3 Dashboard - budget-service paused (DEADLINE_EXCEEDED)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/api/v1/analytics/dashboard/{{userId}}?periodMonth={{periodMonth}}",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "analytics",
+                    "dashboard",
+                    "{{userId}}"
+                  ],
+                  "query": [
+                    {
+                      "key": "periodMonth",
+                      "value": "{{periodMonth}}"
+                    }
+                  ]
+                },
+                "description": "Expect 503 after about 2 s: the deadline, not an indefinite hang."
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const now = new Date();",
+                      "pm.collectionVariables.set('today', now.toISOString().slice(0, 10));",
+                      "pm.collectionVariables.set('periodMonth', now.toISOString().slice(0, 7));"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('503 Service Unavailable', () => pm.response.to.have.status(503));",
+                      "const p = pm.response.json();",
+                      "pm.test('ProblemDetail errorCode DOWNSTREAM_SERVICE_UNAVAILABLE', () => pm.expect(p.errorCode).to.eql('DOWNSTREAM_SERVICE_UNAVAILABLE'));",
+                      "pm.test('detail names budget-service', () => pm.expect(p.detail).to.include('budget-service'));",
+                      "pm.test('ends at the deadline (~2s), not later', () => { pm.expect(pm.response.responseTime).to.be.above(1500); pm.expect(pm.response.responseTime).to.be.below(4000); });"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "4. Rate limit - user A burst (Runner: 60 iterations, delay 0)",
+          "description": "Bucket key is user:<user A's JWT subject>. Burst capacity 20, refill 10/s: expect roughly the first 20-30 iterations 200 and the rest 429 (the split varies with how fast your machine sends; the last iteration asserts at least one 429 occurred). Every 429 is checked for the RFC 7807 body and Retry-After (fix 5). The Runner sends one request at a time, so a 429 needs the average round trip under ~100 ms; if the last iteration's check fails on a slow machine, re-run with 100 iterations. Run folder 5 immediately after.",
+          "item": [
+            {
+              "name": "4.1 Probe as user A",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/api/v1/transactions?userId={{userId}}&page=0&size=1",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "transactions"
+                  ],
+                  "query": [
+                    {
+                      "key": "userId",
+                      "value": "{{userId}}"
+                    },
+                    {
+                      "key": "page",
+                      "value": "0"
+                    },
+                    {
+                      "key": "size",
+                      "value": "1"
+                    }
+                  ]
+                },
+                "description": "200 until user A's bucket is empty, then 429."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const code = pm.response.code;",
+                      "pm.test('200 or 429 only', () => pm.expect([200, 429]).to.include(code));",
+                      "if (code === 200) {",
+                      "  pm.test('X-RateLimit-Remaining header present', () => pm.response.to.have.header('X-RateLimit-Remaining'));",
+                      "} else {",
+                      "  pm.test('Content-Type is application/problem+json', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json'));",
+                      "  pm.test('Retry-After is 1', () => pm.expect(pm.response.headers.get('Retry-After')).to.eql('1'));",
+                      "  const p = pm.response.json();",
+                      "  pm.test('status 429 in body', () => pm.expect(p.status).to.eql(429));",
+                      "  pm.test('errorCode RATE_LIMIT_EXCEEDED', () => pm.expect(p.errorCode).to.eql('RATE_LIMIT_EXCEEDED'));",
+                      "  pm.test('correlationId present', () => pm.expect(p.correlationId).to.be.a('string').and.not.empty);",
+                      "  pm.test('instance is the request path', () => pm.expect(p.instance).to.eql('/api/v1/transactions'));",
+                      "}",
+                      "if (pm.info.iteration === 0) { pm.collectionVariables.set('count429', 0); }",
+                      "if (pm.response.code === 429) { pm.collectionVariables.set('count429', Number(pm.collectionVariables.get('count429') || 0) + 1); }",
+                      "if (pm.info.iterationCount > 1 && pm.info.iteration === pm.info.iterationCount - 1) {",
+                      "  pm.test('burst produced at least one 429 across the run', () => pm.expect(Number(pm.collectionVariables.get('count429'))).to.be.above(0));",
+                      "}"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "5. Rate limit - user B unaffected",
+          "description": "Run right after folder 4 while user A is still throttled. Same client IP, different user: must be 200, which proves buckets are keyed by principal, not IP (fix 3).",
+          "item": [
+            {
+              "name": "5.1 Probe as user B",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessTokenB}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/api/v1/transactions?userId={{userId}}&page=0&size=1",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "transactions"
+                  ],
+                  "query": [
+                    {
+                      "key": "userId",
+                      "value": "{{userId}}"
+                    },
+                    {
+                      "key": "page",
+                      "value": "0"
+                    },
+                    {
+                      "key": "size",
+                      "value": "1"
+                    }
+                  ]
+                },
+                "description": "Expect 200: user B has a full bucket of its own."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('200 OK - own bucket', () => pm.response.to.have.status(200));"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "6. Rate limit - anonymous by X-Forwarded-For (Runner: 60 iterations, delay 0)",
+          "description": "No token, so the key falls back to the client IP from X-Forwarded-For (ip:203.0.113.10). Expect 429s after the burst. Then edit the header to 203.0.113.20 and send once: 200 again, a different bucket. That second result is also the caveat: with nothing in front of the Gateway, a client controls this header \u2014 see spendwise.rate-limit.trusted-proxy-hops in config-repo/api-gateway.yml.",
+          "item": [
+            {
+              "name": "6.1 Login probe with X-Forwarded-For",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "X-Forwarded-For",
+                    "value": "203.0.113.10"
+                  }
+                ],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/api/v1/auth/login",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "auth",
+                    "login"
+                  ]
+                },
+                "description": "Empty JSON body: auth-service rejects it with 400 at validation, before any password hashing, so the burst outpaces the refill. 400 while allowed; 429 once the IP bucket is empty.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{}"
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const code = pm.response.code;",
+                      "pm.test('400 while allowed, 429 when throttled', () => pm.expect([400, 429]).to.include(code));",
+                      "if (code === 429) {",
+                      "  pm.test('Retry-After present', () => pm.response.to.have.header('Retry-After'));",
+                      "  pm.test('errorCode RATE_LIMIT_EXCEEDED', () => pm.expect(pm.response.json().errorCode).to.eql('RATE_LIMIT_EXCEEDED'));",
+                      "  pm.test('instance is the login path', () => pm.expect(pm.response.json().instance).to.eql('/api/v1/auth/login'));",
+                      "}",
+                      "if (pm.info.iteration === 0) { pm.collectionVariables.set('count429', 0); }",
+                      "if (pm.response.code === 429) { pm.collectionVariables.set('count429', Number(pm.collectionVariables.get('count429') || 0) + 1); }",
+                      "if (pm.info.iterationCount > 1 && pm.info.iteration === pm.info.iterationCount - 1) {",
+                      "  pm.test('burst produced at least one 429 across the run', () => pm.expect(Number(pm.collectionVariables.get('count429'))).to.be.above(0));",
+                      "}"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "7. Redis down - fail fast (fix 4)",
+          "description": "Before 7.1: docker compose stop redis. Rate limiting fails open (requests allowed) and must not add latency. Afterwards: docker compose start redis.",
+          "item": [
+            {
+              "name": "7.1 Probe with Redis stopped",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/api/v1/transactions?userId={{userId}}&page=0&size=1",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "transactions"
+                  ],
+                  "query": [
+                    {
+                      "key": "userId",
+                      "value": "{{userId}}"
+                    },
+                    {
+                      "key": "page",
+                      "value": "0"
+                    },
+                    {
+                      "key": "size",
+                      "value": "1"
+                    }
+                  ]
+                },
+                "description": "Expect 200 well under a second; X-RateLimit-Remaining is -1, RedisRateLimiter's fail-open marker."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('200 OK - fails open', () => pm.response.to.have.status(200));",
+                      "pm.test('no Redis timeout penalty (< 1000 ms)', () => pm.expect(pm.response.responseTime).to.be.below(1000));",
+                      "pm.test('fail-open marker X-RateLimit-Remaining = -1', () => pm.expect(pm.response.headers.get('X-RateLimit-Remaining')).to.eql('-1'));"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
     }
   ]
 }

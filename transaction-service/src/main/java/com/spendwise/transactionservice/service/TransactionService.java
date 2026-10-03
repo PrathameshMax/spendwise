@@ -3,6 +3,7 @@ package com.spendwise.transactionservice.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.spendwise.common.exception.ResourceNotFoundException;
+import com.spendwise.common.tracing.CorrelationIdConstants;
 import com.spendwise.transactionservice.api.CreateTransactionRequest;
 import com.spendwise.transactionservice.api.TransactionFilter;
 import com.spendwise.transactionservice.api.TransactionResponse;
@@ -19,6 +20,7 @@ import com.spendwise.transactionservice.domain.TransactionSpecifications;
 import com.spendwise.transactionservice.event.TransactionCreatedEvent;
 import com.spendwise.transactionservice.mapper.TransactionMapper;
 import feign.FeignException;
+import org.slf4j.MDC;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -33,6 +35,7 @@ import java.util.concurrent.CompletionException;
 public class TransactionService {
 
     private static final String AGGREGATE_TYPE_TRANSACTION = "Transaction";
+    private static final int MAX_CORRELATION_ID_LENGTH = 64;
 
     private final TransactionRepository transactionRepository;
     private final CategoryRepository categoryRepository;
@@ -103,6 +106,13 @@ public class TransactionService {
      * than adding a checked exception to this method's (and in turn
      * {@code TransactionController#create}'s) signature for a failure mode
      * that cannot occur for this payload shape.
+     *
+     * <p>Milestone 17 — the request's correlation id is read from the MDC
+     * here, on the servlet request thread where {@code CorrelationIdFilter}
+     * populated it, and persisted on the row, because the publisher that
+     * later sends this event runs on a scheduler thread with no request
+     * context. MDC is safe to read here (one thread per request, filter
+     * clears it on exit) in a way it would not be on a reactive stack.
      */
     private void recordOutboxEvent(Transaction saved) {
         TransactionCreatedEvent event = new TransactionCreatedEvent(
@@ -121,12 +131,25 @@ public class TransactionService {
                     AGGREGATE_TYPE_TRANSACTION,
                     saved.getId(),
                     TransactionCreatedEvent.class.getSimpleName(),
-                    objectMapper.writeValueAsString(event)));
+                    objectMapper.writeValueAsString(event),
+                    persistableCorrelationId()));
         } catch (JsonProcessingException ex) {
             throw new IllegalStateException(
                     "Failed to serialize " + TransactionCreatedEvent.class.getSimpleName()
                             + " for transaction " + saved.getId(), ex);
         }
+    }
+
+    /**
+     * The correlation id is client-supplied (the filters only replace a
+     * missing or blank header), while {@code outbox_events.correlation_id} is
+     * {@code VARCHAR(64)}. An over-long value is dropped rather than truncated
+     * — a truncated id would no longer match anything — so a malformed header
+     * can never fail the outbox insert and, with it, roll back the transaction.
+     */
+    private static String persistableCorrelationId() {
+        String correlationId = MDC.get(CorrelationIdConstants.MDC_KEY);
+        return correlationId != null && correlationId.length() <= MAX_CORRELATION_ID_LENGTH ? correlationId : null;
     }
 
     /**

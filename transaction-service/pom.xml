@@ -92,6 +92,14 @@
             <groupId>io.github.resilience4j</groupId>
             <artifactId>resilience4j-spring-boot3</artifactId>
         </dependency>
+        <!-- Milestone 17 — KafkaTemplate/KafkaAdmin for OutboxPublisher. Version
+             managed by spring-boot-dependencies (spring-kafka 3.3.x for Boot 3.4.1),
+             so no explicit version here. Producer only: transaction-service has
+             no @KafkaListener until Milestone 21's compensation flow. -->
+        <dependency>
+            <groupId>org.springframework.kafka</groupId>
+            <artifactId>spring-kafka</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>

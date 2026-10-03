@@ -64,6 +64,8 @@ docker compose up -d --build
 # traces:      http://localhost:9411
 # metrics:     http://localhost:9090 (Prometheus)
 # dashboards:  http://localhost:3000 (Grafana, admin / spendwise)
+# Kafka (Milestone 17): brokers on localhost:29092/39092/49092
+# Kafka UI (optional):  docker compose --profile tools up -d kafka-ui  ->  http://localhost:8090
 ```
 
 Compose brings services up in dependency order — `postgres`/`config-server`
@@ -109,8 +111,12 @@ mvn -pl user-service spring-boot:run
 # its container already publishes 6379 to the host, so api-gateway's own
 # ${REDIS_HOST:localhost} default (config-repo/api-gateway.yml) reaches it
 # unchanged, exactly like postgres's DB_HOST default already does.
+# Milestone 17 adds postgres-db-init (creates any missing service database
+# on an existing volume, then exits) and the three Kafka brokers, which
+# transaction-service's outbox publisher reaches on the host-published ports
+# its ${KAFKA_BOOTSTRAP_SERVERS:localhost:29092,...} default already lists.
 docker compose -f docker-compose.yml -f docker-compose.override.ide.yml \
-  up -d zipkin postgres redis prometheus grafana
+  up -d zipkin postgres postgres-db-init redis kafka-1 kafka-2 kafka-3 prometheus grafana
 ```
 
 As of Milestone 6, `api-gateway` (port 8080) is the intended entry point for every
@@ -1600,9 +1606,264 @@ starting the containers and for the one check Postman itself cannot do
    really do share one transaction: a failure before the method returns
    rolls both back together, not just the one that happened to run first.
 
-Next: Milestone 17 — Decoupled Processing & Message-Driven Architecture
-(Kafka Producer/Consumer, the outbox-publisher poller that finally reads this
-milestone's table).
+**Milestone 17 complete** — Decoupled Message Streaming (Apache Kafka
+Integration). Scoped to the roadmap's two sentences: a multi-partition Kafka
+cluster in Docker Compose, and a background outbox-publisher thread in
+transaction-service that reads `outbox_events`, publishes to the
+multi-partition `transaction-events` topic, and flags a row complete only on
+broker acknowledgment. There are no consumers yet; `@KafkaListener`s in
+notification-service and analytics-service are Milestone 18.
+
+Seven fixes raised validating Milestones 15 and 16 fold in here (1–6 and
+8), plus one found while building this one (7):
+
+1. **gRPC deadline + 503** — `BudgetSummaryGrpcClient` sets
+   `withDeadlineAfter(2s)` per call and maps `UNAVAILABLE`/`DEADLINE_EXCEEDED`
+   to `DownstreamServiceUnavailableException` (503 ProblemDetail).
+2. **Idempotent database creation** — `infra/postgres-init/01-create-databases.sql`
+   rewritten with psql `\gexec` (create only if absent), and run on every
+   `docker compose up` by a new one-shot `postgres-db-init` container that all
+   database-backed services wait on (`service_completed_successfully`).
+3. **Rate-limit key: principal, then IP** — `RateLimitConfig#clientKeyResolver`:
+   `user:<JWT sub>` when authenticated, otherwise `ip:<X-Forwarded-For client IP
+   | socket address>`, never empty.
+4. **Redis down fails fast** — Lettuce `DisconnectedBehavior.REJECT_COMMANDS`
+   plus `spring.data.redis.timeout`/`connect-timeout` of 200ms.
+5. **429 as RFC 7807 + `Retry-After`** — `ProblemDetailRateLimitFilter` replaces
+   the built-in `requestRateLimiter` on every route.
+6. **Mockito as `-javaagent`** — `mockito-agent` profile in the parent `pom.xml`.
+7. *(found building this milestone)* **analytics-service Gateway route** —
+   Milestone 15 added `GET /api/v1/analytics/dashboard/{userId}` and documented
+   calling it through the Gateway, but `RouteConfig` never got the route, so
+   that call 404'd at the Gateway. Added.
+8. **Postman test plan** replaces shell commands for validation from this
+   milestone on (`Milestone 17 - Test Plan` folder in the collection).
+
+An independent review of this milestone's diff (needed because it could not be
+compiled here, see below) found three more, fixed before handover:
+
+- **postgres healthcheck over TCP** (`pg_isready -h 127.0.0.1`). On a fresh
+  volume, the entrypoint runs its init scripts on a socket-only temporary
+  server, so the socket check could pass while TCP clients were still refused.
+  With fix 2's `postgres-db-init`, that race would have stopped every
+  database-backed service from starting after a `down -v`.
+- **Over-long correlation id.** `X-Correlation-ID` is client-supplied with no
+  length check, and `outbox_events.correlation_id` is `VARCHAR(64)`.
+  `TransactionService` now drops a longer value instead of letting the insert
+  fail and roll back the whole request as a 500.
+- **gRPC target `dns:///` instead of `static://`.** net.devh's static resolver
+  resolves the host once, so a budget-service recreated with a new container IP
+  was never reached again until analytics-service restarted. grpc-java's DNS
+  resolver re-resolves when connections fail.
+
+**The cluster — `docker-compose.yml`.** Three `apache/kafka:3.9.0` nodes in
+KRaft mode (no ZooKeeper), each both broker and controller — the layout of
+the official image's own multi-node example. Three nodes, not one, because
+the topic is created with replication factor 3 and `min.insync.replicas` 2:
+an `acks=all` write is acknowledged only once two replicas hold it, so one
+broker can be lost without losing an acknowledged event or stalling the
+publisher (folder 2 of the test plan stops `kafka-3` to show exactly that).
+`auto.create.topics.enable` is off: the topic is provisioned explicitly, so a
+mistyped topic name fails instead of silently creating a one-partition,
+one-replica topic. Each node is capped at a 256 MB heap and 512 MB container
+limit; on a 16 GB laptop running the full stack, the three nodes together
+cost about 1.5 GB. `kafka-ui` (kafbat, a browser view of topics, partitions,
+messages and their headers) sits behind the `tools` compose profile and
+starts only when asked for.
+
+**`OutboxPublisher`** (new, `transaction-service/.../outbox`) — the relay. A
+`@Scheduled` poll (every 1 s after the previous one finishes) runs one
+`TransactionTemplate` transaction that:
+
+- claims up to 100 unprocessed rows with `SELECT ... FOR UPDATE SKIP LOCKED`
+  (**`OutboxEventRepository#lockNextUnprocessedBatch`**, new);
+- sends each one with `kafkaTemplate.send(record).get(timeout)`, so the
+  thread waits for the broker's `acks=all` acknowledgment;
+- calls **`OutboxEvent#markProcessed`** (new) only after that
+  acknowledgment, and stops the batch at the first failure.
+
+Rows already acknowledged commit as processed. The failed row and everything
+after it stay unprocessed and are claimed again on the next poll, in the
+same order. `SKIP LOCKED` means two transaction-service replicas drain
+disjoint batches instead of both publishing the same rows — checked against
+a real Postgres 16 while building this: a second session claiming while the
+first held its locks got the next rows, without blocking. The record key is
+`aggregateId`, so all events for one transaction land on one partition, in
+order. Headers: `outboxEventId` (the key Milestone 19's idempotency layer will
+deduplicate on), `eventType`, `aggregateType`, `X-Correlation-ID`, and the W3C
+`traceparent` that `spring.kafka.template.observation-enabled` adds. The topic
+is created on the first poll that can reach the cluster, through `KafkaAdmin`
+(3 partitions, RF 3, `min.insync.replicas` 2), not at application startup:
+transaction-service has to keep accepting writes while Kafka is down — that
+is the outbox pattern's whole promise — so Kafka is deliberately not a
+startup dependency (`depends_on: service_started`, not `service_healthy`).
+
+**`OutboxPublisherProperties`** (new) binds `spendwise.outbox.publisher.*`
+(batch size, topic, partitions, replication, min ISR, send timeout);
+**`OutboxPublisherConfig`** (new, `config`) enables scheduling and the
+properties. Producer settings live in `config-repo/transaction-service.yml`:
+`acks: all`, `enable.idempotence: true` (a producer retry can never write a
+record twice to the log), and bounded `max.block.ms`/`request.timeout.ms`/
+`delivery.timeout.ms`, so an unreachable cluster can't hold a poll's row locks
+for the client defaults of up to two minutes.
+
+**`V5__add_correlation_id_to_outbox_events.sql`** (new) +
+**`OutboxEvent`**/**`TransactionService`** (modified) — the outbox row is
+written on the request thread but published later on a scheduler thread that
+has no request context. Without persisting the request's correlation id on
+the row, nothing on the Kafka record could be traced back to the API call
+that caused it. `TransactionService` reads it from the MDC (safe on this
+one-thread-per-request servlet service) and the publisher puts it on the
+record as `X-Correlation-ID`, and into the MDC for the duration of that one
+send's log lines only.
+
+**Q57: Event-driven architecture — how do you use Kafka for decoupling
+services?** The producer publishes a fact ("transaction created") to a topic
+and stops there. It does not know who consumes it, how many consumers there
+are, or whether any are running. That removes three couplings a synchronous
+call has:
+
+- **Availability** — transaction-service keeps working when every consumer is
+  down, and here even when Kafka itself is down (the outbox absorbs the gap).
+- **Speed** — a slow consumer lags behind on its own partition offset instead
+  of slowing the producer.
+- **Change** — Milestone 18 adds two consumers, notification-service and
+  analytics-service, with zero changes to transaction-service.
+
+Partitions are the unit of both ordering and parallelism. Keying by aggregate
+id gives per-aggregate ordering while spreading load over all three
+partitions, which caps a consumer group at three active consumers (Milestone
+18's chaos lab). Replication (RF 3, min ISR 2, `acks=all`) is what makes "the
+broker acknowledged it" mean "it survives a broker loss". The cost is eventual
+consistency and at-least-once delivery: consumers see events after the fact,
+and occasionally twice — a publisher that crashes between the broker's ack and
+committing `processed_at` republishes on restart. That is why the
+`outboxEventId` header exists, and why Milestone 19 builds consumer-side
+idempotency.
+
+**Fix 1 — `BudgetSummaryGrpcClient`.** gRPC calls have no deadline unless
+the caller sets one, so a budget-service that accepted the connection but never
+answered left the dashboard request hanging indefinitely. The deadline is
+applied per call, on a fresh stub view: `withDeadlineAfter` fixes an absolute
+expiry when it is called, so applying it once to the injected stub would fail
+every call after the first two seconds of uptime. `UNAVAILABLE` and
+`DEADLINE_EXCEEDED` both mean "the dependency is the problem, retry later",
+so both become a 503, the same contract transaction-service's Feign fallbacks
+give for user-service. Every other gRPC status is left alone: those are bugs,
+and labelling them "temporarily unavailable" would hide them.
+
+**Fix 2 — database creation.** Postgres has no `CREATE DATABASE IF NOT
+EXISTS`, and `CREATE DATABASE` can't run inside a `DO` block, so each line is
+`SELECT 'CREATE DATABASE x' WHERE NOT EXISTS (...) \gexec`. The SELECT emits
+the statement only when the database is missing, and `\gexec` runs what it
+emitted. The same file still serves postgres's own initdb hook for a fresh
+volume. Checked against a real Postgres 16 while building this: it creates
+all five databases on the first run, does nothing on the second, and
+recreates `analytics_db` after it is dropped — the exact existing-volume case
+that was missed. The manual `CREATE DATABASE analytics_db` step in Milestone
+15's validation notes is no longer needed.
+
+**Fix 3 — `RateLimitConfig#clientKeyResolver`.** Keying on IP alone put
+every user behind one NAT or corporate proxy into one 20-token bucket.
+Authenticated requests are now keyed by JWT subject (`user:` prefix);
+anonymous ones (login/register, the brute-force targets) by client IP (`ip:`
+prefix). Anonymous-token principals are excluded, so unauthenticated callers
+can never share one `user:anonymousUser` bucket. The X-Forwarded-For entry
+used is the one at `size - trusted-proxy-hops` (default 1, i.e. one load
+balancer in front). It is accepted only if it is an IP literal, and is never
+handed to `InetAddress`, which would do a blocking DNS lookup on a Netty
+event-loop thread for a hostname-shaped value. **Caveat:** with nothing in
+front of the Gateway — as in this compose setup — every X-Forwarded-For value
+is client-supplied. A client can rotate it to get a fresh anonymous bucket per
+request (test plan folder 6 shows this). Set
+`spendwise.rate-limit.trusted-proxy-hops: 0` wherever the Gateway is exposed
+directly.
+
+**Fix 4 — Lettuce.** Lettuce's default is to queue commands while
+disconnected and replay them on reconnect, so with Redis stopped every
+rate-limit check waited out the full command timeout. `REJECT_COMMANDS`
+fails the command at once; `RedisRateLimiter` already fails open on any Redis
+error. Applied through Boot's `LettuceClientOptionsBuilderCustomizer`, which
+runs after Boot has applied the `spring.data.redis.*` timeouts, so those are
+kept rather than replaced.
+
+**Fix 5 — `ProblemDetailRateLimitFilter`** (new, `api-gateway/.../filter`).
+The built-in filter rejects with `setComplete()`: an empty 429 with no hint of
+when to retry, and no extension point on that branch. The new filter performs
+the same three steps — resolve the key, ask the same `RedisRateLimiter` bean,
+copy the `X-RateLimit-*` headers — and on rejection writes
+`application/problem+json` (the same `type/title/status/detail/instance` +
+`errorCode` + `correlationId` shape the services' exception handlers return)
+and `Retry-After`. `Retry-After` is `ceil(requestedTokens / replenishRate)`
+seconds, which is 1 here. The filter runs at `HIGHEST_PRECEDENCE + 20`: after
+the correlation-id and user-context filters, before any body-rewriting filter.
+
+**Fix 6 — `pom.xml`.** Mockito 5 self-attaches its agent at runtime, which
+JDK 21 warns about (JEP 451) and a future JDK will refuse. Mockito's
+documented fix is used: `maven-dependency-plugin:properties` exposes
+mockito-core's jar path, and surefire passes it as `-javaagent`. `-Xshare:off`
+also silences the CDS warning a `-javaagent` triggers. It is a profile activated
+by `src/test/java` existing, because spendwise-common has no tests and no
+mockito-core. A plain plugin there would leave the property unresolved and
+break the forked JVM. Surefire 3.5.2 and dependency-plugin 3.8.1 are now
+pinned; a BOM import manages dependency versions, not plugin versions.
+
+### Validating Milestone 17
+
+**This milestone was not compiled or run where it was written.** The build
+sandbox has no access to Maven Central or Docker Hub and no Docker daemon. What
+was verified there: every YAML/XML/JSON file parses; `docker compose config`
+passes, with and without the `tools` profile; there are no duplicate host
+ports; and the database script, all five transaction-service migrations, and
+the `SKIP LOCKED` claim query ran against a real Postgres 16. Every
+third-party API used was checked against that library's source at the exact
+version in use (Spring Cloud Gateway 4.2.0, Spring Boot 3.4.1, spring-kafka
+3.3.1, Apache Kafka 3.9.0). Step 0 is therefore the first real compile and
+start-up of this code.
+
+**Step 0 — build and start (Git Bash).**
+
+```bash
+cd /d/spendwise
+./mvnw clean test-compile
+./mvnw -pl api-gateway -am test
+docker compose up -d --build
+docker compose ps -a
+docker compose --profile tools up -d kafka-ui
+```
+
+- `test-compile` must end in `BUILD SUCCESS` for all ten modules.
+- The api-gateway test run (the one module with unit tests) must not print
+  `Mockito is currently self-attaching` (fix 6).
+- In `docker compose ps -a`: `spendwise-postgres-db-init` shows `Exited (0)`
+  (fix 2); the three `spendwise-kafka-N` containers and every service show
+  `healthy`.
+- `docker compose logs transaction-service | grep "Topic transaction-events ready"`
+  shows the topic was provisioned.
+
+**Steps 1–7 — Postman.** Import `postman/SpendWise.postman_collection.json` and
+run the `Milestone 17 - Test Plan` folder top to bottom. Every request asserts
+its own expected result in its Tests tab. A folder that needs a container
+stopped first says so in its description; those are the only terminal steps.
+
+| Folder | What it proves | Expected |
+| --- | --- | --- |
+| 0. Setup | two users, a profile, a category | all `201` |
+| 1. Outbox to Kafka | outbox row → Kafka on broker ack | `201`; in Kafka UI, one record keyed by the transaction id, headers `eventType`, `outboxEventId`, `X-Correlation-ID` (= the one Postman sent), `traceparent`; topic shows 3 partitions, RF 3 |
+| 2. Kafka outage | writes survive a full Kafka outage | `201` with all brokers stopped; record appears after they restart; with only `kafka-3` stopped, published immediately |
+| 3. gRPC deadline / 503 | fix 1, the new analytics route, `dns:///` re-resolution | `200`; budget-service stopped → `503` `DOWNSTREAM_SERVICE_UNAVAILABLE` in < 3 s; restarted and then paused → `503` at ~2 s |
+| 4. Rate limit, user A (Runner, 60×) | fixes 3 + 5 | `200`s then `429`s; each `429` is `application/problem+json`, `Retry-After: 1`, `errorCode RATE_LIMIT_EXCEEDED`, `correlationId` set |
+| 5. Rate limit, user B | buckets are per principal | `200` while user A is still throttled |
+| 6. Anonymous by X-Forwarded-For (Runner, 60×) | IP fallback | `400`s then `429`s for `203.0.113.10`; a different value is a fresh bucket |
+| 7. Redis down | fix 4 | `200` in < 1 s with `X-RateLimit-Remaining: -1` (fail-open marker) |
+
+To see `processed_at` itself rather than its effect in Kafka UI, connect any
+Postgres client (DBeaver, pgAdmin) to `localhost:5432`, database
+`transaction_db`, `spendwise`/`spendwise`, and open `outbox_events`. Rows from
+folder 1 have `processed_at` and `correlation_id` set. During folder 2's
+outage, the new row's `processed_at` stays empty until the brokers return.
+
+Next: Milestone 18 — Mass Scale Ingestion (Consumer Groups & Rebalancing).
 
 ## API Versioning & Deprecation Policy
 

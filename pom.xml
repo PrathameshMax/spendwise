@@ -67,6 +67,16 @@
              spring-cloud-dependencies play for everything else in this table. Latest
              stable per Maven Central as of this milestone. -->
         <grpc-spring-boot-starter.version>3.1.0.RELEASE</grpc-spring-boot-starter.version>
+        <!-- Milestone 17 fix — Maven's super-POM default plugin versions are not
+             managed by the imported Boot BOM (a BOM import manages dependencies,
+             not plugins), so these two are pinned explicitly for the Mockito
+             agent configuration in the mockito-agent profile below. -->
+        <maven-surefire-plugin.version>3.5.2</maven-surefire-plugin.version>
+        <maven-dependency-plugin.version>3.8.1</maven-dependency-plugin.version>
+        <!-- Empty default so surefire's late-bound @{argLine} below always
+             resolves; a plugin that sets argLine itself (e.g. a JaCoCo agent,
+             if one is added later) is appended to, not overwritten. -->
+        <argLine></argLine>
     </properties>
 
     <dependencyManagement>
@@ -155,7 +165,68 @@
                         </execution>
                     </executions>
                 </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-surefire-plugin</artifactId>
+                    <version>${maven-surefire-plugin.version}</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-dependency-plugin</artifactId>
+                    <version>${maven-dependency-plugin.version}</version>
+                </plugin>
             </plugins>
         </pluginManagement>
     </build>
+
+    <profiles>
+        <!-- Milestone 17 fix — load Mockito's inline mock maker as a -javaagent
+             instead of letting it self-attach at runtime. Mockito 5 (via
+             spring-boot-starter-test) attaches its byte-buddy agent dynamically
+             on first use, which JDK 21 now warns about ("Mockito is currently
+             self-attaching to enable the inline-mock-maker... dynamic loading of
+             agents will be disallowed by default in a future release", JEP 451).
+             Mockito's documented fix: maven-dependency-plugin's `properties` goal
+             exposes every dependency's local jar path as a property named
+             groupId:artifactId:type, and surefire passes mockito-core's as
+             -javaagent. @{argLine} (late-bound, not ${argLine}) keeps anything
+             another plugin already put in argLine.
+
+             A profile, activated only for modules that have a src/test/java
+             directory, rather than a plain parent-level plugin: spendwise-common
+             has no tests and no mockito-core dependency, so
+             ${org.mockito:mockito-core:jar} would stay an unresolved literal
+             there and the forked test JVM would fail to start on it. -->
+        <profile>
+            <id>mockito-agent</id>
+            <activation>
+                <file>
+                    <exists>${basedir}/src/test/java</exists>
+                </file>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-dependency-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>resolve-mockito-agent-path</id>
+                                <goals>
+                                    <goal>properties</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <configuration>
+                            <argLine>@{argLine} -javaagent:${org.mockito:mockito-core:jar} -Xshare:off</argLine>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

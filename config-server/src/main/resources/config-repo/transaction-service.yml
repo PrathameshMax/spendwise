@@ -5,6 +5,58 @@ spring:
     password: ${DB_PASSWORD:spendwise}
   flyway:
     enabled: true
+  # Milestone 17 — producer side of the outbox relay (OutboxPublisher).
+  # The ${VAR:...} default lists the three brokers' host-published ports for
+  # `mvn spring-boot:run` on the host; docker-compose.yml overrides it with the
+  # in-network listener (kafka-N:19092), same pattern as DB_HOST.
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:29092,localhost:39092,localhost:49092}
+    producer:
+      # acks=all + idempotence: the broker acknowledges only once every
+      # in-sync replica (min.insync.replicas=2 on the topic) has the record,
+      # and producer-side retries can never write a record twice to the log.
+      # That acknowledgment is the one OutboxPublisher waits for before it
+      # sets processed_at.
+      acks: all
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      properties:
+        enable.idempotence: true
+        max.in.flight.requests.per.connection: 5
+        # Bounded so a poll holding row locks can't stall for the client
+        # defaults (60s metadata wait, 120s delivery timeout) when the cluster
+        # is unreachable. delivery.timeout.ms must be >= linger.ms + request.timeout.ms.
+        max.block.ms: 5000
+        request.timeout.ms: 5000
+        delivery.timeout.ms: 10000
+        linger.ms: 0
+    template:
+      # Micrometer observation on KafkaTemplate: adds a producer span per send
+      # (exported to Zipkin like every HTTP span) and a W3C traceparent header
+      # on each record for Milestone 18's consumers to continue the trace.
+      observation-enabled: true
+    admin:
+      # OutboxPublisher provisions the topic lazily via KafkaAdmin; these keep
+      # an unreachable cluster from blocking a poll for the client defaults.
+      operation-timeout: 5s
+      properties:
+        request.timeout.ms: 5000
+        default.api.timeout.ms: 5000
+
+spendwise:
+  outbox:
+    publisher:
+      enabled: true
+      # Read directly by @Scheduled(fixedDelayString) on OutboxPublisher:
+      # delay between the end of one poll and the start of the next.
+      poll-interval-ms: 1000
+      initial-delay-ms: 5000
+      batch-size: 100
+      topic: transaction-events
+      partitions: 3
+      replication-factor: 3
+      min-in-sync-replicas: 2
+      send-timeout: 10s
 
 management:
   endpoint:
