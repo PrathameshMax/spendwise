@@ -1,5 +1,6 @@
 package com.spendwise.transactionservice.outbox;
 
+import com.spendwise.common.messaging.EventHeaders;
 import com.spendwise.common.tracing.CorrelationIdConstants;
 import com.spendwise.transactionservice.domain.OutboxEvent;
 import com.spendwise.transactionservice.domain.OutboxEventRepository;
@@ -72,10 +73,6 @@ import java.util.concurrent.TimeoutException;
 @Component
 @ConditionalOnProperty(prefix = "spendwise.outbox.publisher", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class OutboxPublisher {
-
-    static final String HEADER_OUTBOX_EVENT_ID = "outboxEventId";
-    static final String HEADER_EVENT_TYPE = "eventType";
-    static final String HEADER_AGGREGATE_TYPE = "aggregateType";
 
     private static final Logger log = LoggerFactory.getLogger(OutboxPublisher.class);
 
@@ -178,9 +175,9 @@ public class OutboxPublisher {
     private ProducerRecord<String, String> toRecord(OutboxEvent event) {
         ProducerRecord<String, String> record = new ProducerRecord<>(
                 properties.topic(), event.getAggregateId().toString(), event.getPayload());
-        record.headers().add(HEADER_OUTBOX_EVENT_ID, utf8(event.getId().toString()));
-        record.headers().add(HEADER_EVENT_TYPE, utf8(event.getEventType()));
-        record.headers().add(HEADER_AGGREGATE_TYPE, utf8(event.getAggregateType()));
+        record.headers().add(EventHeaders.OUTBOX_EVENT_ID, utf8(event.getId().toString()));
+        record.headers().add(EventHeaders.EVENT_TYPE, utf8(event.getEventType()));
+        record.headers().add(EventHeaders.AGGREGATE_TYPE, utf8(event.getAggregateType()));
         if (event.getCorrelationId() != null) {
             record.headers().add(CorrelationIdConstants.HEADER_NAME, utf8(event.getCorrelationId()));
         }

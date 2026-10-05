@@ -1,3 +1,13 @@
 # Centralized configuration for notification-service. Populated as later milestones (JPA,
 # security, Kafka, resilience) introduce properties that need to be
 # environment-driven.
+
+# Milestone 18 — adds kafkaassignments (spendwise-common's KafkaAssignmentsEndpoint)
+# to the platform-wide exposure list from application.yml: which partitions this
+# instance's TransactionAlertListener owns right now. The full list is repeated
+# because exposure.include is replaced, not merged, by a more specific file.
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,refresh,metrics,prometheus,kafkaassignments

@@ -31,7 +31,8 @@
     },
     {
       "key": "notificationServiceUrl",
-      "value": "http://localhost:8085"
+      "value": "http://localhost:18085",
+      "description": "Milestone 18: notification-service is scalable; its replicas are published on 18085-18088 (18085 with one replica)."
     },
     {
       "key": "analyticsServiceUrl",
@@ -89,6 +90,41 @@
       "key": "count429",
       "value": "",
       "description": "Milestone 17 test plan: 429s counted across a Runner burst."
+    },
+    {
+      "key": "created18",
+      "value": "",
+      "description": "Milestone 18 test plan: transactions created by folder 1b (Runner)."
+    },
+    {
+      "key": "baselineNotification",
+      "value": "",
+      "description": "Milestone 18 test plan: notification-service consumed count before folder 1b."
+    },
+    {
+      "key": "baselineAnalytics",
+      "value": "",
+      "description": "Milestone 18 test plan: analytics-service consumed count before folder 1b."
+    },
+    {
+      "key": "assign_18085",
+      "value": "",
+      "description": "Milestone 18 chaos lab: partitions owned by the replica on host port 18085."
+    },
+    {
+      "key": "assign_18086",
+      "value": "",
+      "description": "Milestone 18 chaos lab: partitions owned by the replica on host port 18086."
+    },
+    {
+      "key": "assign_18087",
+      "value": "",
+      "description": "Milestone 18 chaos lab: partitions owned by the replica on host port 18087."
+    },
+    {
+      "key": "assign_18088",
+      "value": "",
+      "description": "Milestone 18 chaos lab: partitions owned by the replica on host port 18088."
     }
   ],
   "item": [
@@ -3122,6 +3158,754 @@
                       "pm.test('200 OK - fails open', () => pm.response.to.have.status(200));",
                       "pm.test('no Redis timeout penalty (< 1000 ms)', () => pm.expect(pm.response.responseTime).to.be.below(1000));",
                       "pm.test('fail-open marker X-RateLimit-Remaining = -1', () => pm.expect(pm.response.headers.get('X-RateLimit-Remaining')).to.eql('-1'));"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Milestone 18 - Test Plan",
+      "description": "Run the folders in order, folders 0-2 with notification-service at its normal single replica (its metrics are per instance). Folders 1a-1c prove that notification-service and analytics-service each receive every event, in their own consumer groups. Folder 2 shows each group's single instance owning all 3 partitions. Folder 3 is the chaos lab: notification-service scaled to 4 replicas against 3 partitions. Turn off 'Stop run if an error occurs' in the Runner for folder 3 (after a kill, one replica's port is expected to refuse connections).",
+      "item": [
+        {
+          "name": "0. Setup",
+          "description": "Token, user profile and category for the transactions below. Run once.",
+          "item": [
+            {
+              "name": "0.1 Register (via Gateway)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/api/v1/auth/register",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "auth",
+                    "register"
+                  ]
+                },
+                "description": "Fresh email per run.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"m18-{{$timestamp}}@spendwise.dev\",\n  \"rawPassword\": \"ChangeMe123!\"\n}"
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                      "pm.collectionVariables.set('accessToken', pm.response.json().accessToken);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "0.2 Create user profile (via Gateway)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/api/v1/users",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "users"
+                  ]
+                },
+                "description": "Sets userId.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"m18-profile-{{$timestamp}}@spendwise.dev\",\n  \"fullName\": \"Milestone 18 Tester\",\n  \"preferredCurrency\": \"INR\"\n}"
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                      "pm.collectionVariables.set('userId', pm.response.json().id);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "0.3 Create category (via Gateway)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/api/v1/categories",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "categories"
+                  ]
+                },
+                "description": "Sets categoryId.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"M18 Dining {{$timestamp}}\"\n}"
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                      "pm.collectionVariables.set('categoryId', pm.response.json().id);"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "1a. Baseline consumed counts",
+          "description": "Records how many records each service's group has consumed so far (spendwise.kafka.records.consumed, outcome=success), so 1c can compare against it.",
+          "item": [
+            {
+              "name": "1a.1 notification-service consumed so far",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{notificationServiceUrl}}/actuator/metrics/spendwise.kafka.records.consumed?tag=group:notification-service&tag=outcome:success",
+                  "host": [
+                    "{{notificationServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "spendwise.kafka.records.consumed"
+                  ],
+                  "query": [
+                    {
+                      "key": "tag",
+                      "value": "group:notification-service"
+                    },
+                    {
+                      "key": "tag",
+                      "value": "outcome:success"
+                    }
+                  ]
+                },
+                "description": "Baseline for notification-service's group."
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// Docker assigns ports from 18085-18088 round-robin, so after a restart the",
+                      "// single replica may not be on 18085. Find whichever port answers.",
+                      "const ports = [18085, 18086, 18087, 18088];",
+                      "function probe(i) {",
+                      "  if (i >= ports.length) { console.warn('No notification-service replica answered on 18085-18088'); return; }",
+                      "  const base = 'http://localhost:' + ports[i];",
+                      "  pm.sendRequest({ url: base + '/actuator/health', method: 'GET' }, (err, res) => {",
+                      "    if (!err && res.code === 200) { pm.collectionVariables.set('notificationServiceUrl', base); console.log('notification-service at', base); }",
+                      "    else { probe(i + 1); }",
+                      "  });",
+                      "}",
+                      "probe(0);",
+                      "pm.collectionVariables.set('created18', 0);"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 404 means no record has been counted yet for this group: treat as 0.",
+                      "const count = pm.response.code === 404 ? 0 : pm.response.json().measurements.find(m => m.statistic === 'COUNT').value;",
+                      "pm.test('metric endpoint answered (200, or 404 = nothing consumed yet)', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                      "pm.collectionVariables.set('baselineNotification', count);",
+                      "console.log('baselineNotification =', count);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "1a.2 analytics-service consumed so far",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{analyticsServiceUrl}}/actuator/metrics/spendwise.kafka.records.consumed?tag=group:analytics-service&tag=outcome:success",
+                  "host": [
+                    "{{analyticsServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "spendwise.kafka.records.consumed"
+                  ],
+                  "query": [
+                    {
+                      "key": "tag",
+                      "value": "group:analytics-service"
+                    },
+                    {
+                      "key": "tag",
+                      "value": "outcome:success"
+                    }
+                  ]
+                },
+                "description": "Baseline for analytics-service's group."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 404 means no record has been counted yet for this group: treat as 0.",
+                      "const count = pm.response.code === 404 ? 0 : pm.response.json().measurements.find(m => m.statistic === 'COUNT').value;",
+                      "pm.test('metric endpoint answered (200, or 404 = nothing consumed yet)', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                      "pm.collectionVariables.set('baselineAnalytics', count);",
+                      "console.log('baselineAnalytics =', count);"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "1b. Create transactions (Runner: 10 iterations)",
+          "description": "Each transaction id is a random key, so the 10 events spread over the topic's 3 partitions. Then wait ~5 s (outbox poll + consumption) before running 1c.",
+          "item": [
+            {
+              "name": "1b.1 Create transaction",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/api/v1/transactions",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "transactions"
+                  ]
+                },
+                "description": "Counts every 201 into created18.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"userId\": \"{{userId}}\",\n  \"categoryId\": \"{{categoryId}}\",\n  \"amount\": 120.0,\n  \"type\": \"EXPENSE\",\n  \"description\": \"Milestone 18 fan-out\",\n  \"transactionDate\": \"{{today}}\",\n  \"currency\": \"INR\"\n}"
+                }
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const now = new Date();",
+                      "pm.collectionVariables.set('today', now.toISOString().slice(0, 10));"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                      "if (pm.response.code === 201) { pm.collectionVariables.set('created18', Number(pm.collectionVariables.get('created18') || 0) + 1); }"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "1c. Both groups consumed everything",
+          "description": "Same records, two groups, two purposes: each count rose by at least the number created in 1b (more is fine \u2014 e.g. retries, or other traffic). Also visible in Kafka UI > Consumers: groups notification-service and analytics-service, each with lag 0 on all 3 partitions.",
+          "item": [
+            {
+              "name": "1c.1 notification-service consumed all",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{notificationServiceUrl}}/actuator/metrics/spendwise.kafka.records.consumed?tag=group:notification-service&tag=outcome:success",
+                  "host": [
+                    "{{notificationServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "spendwise.kafka.records.consumed"
+                  ],
+                  "query": [
+                    {
+                      "key": "tag",
+                      "value": "group:notification-service"
+                    },
+                    {
+                      "key": "tag",
+                      "value": "outcome:success"
+                    }
+                  ]
+                },
+                "description": "Compared with 1a.1."
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// Docker assigns ports from 18085-18088 round-robin, so after a restart the",
+                      "// single replica may not be on 18085. Find whichever port answers.",
+                      "const ports = [18085, 18086, 18087, 18088];",
+                      "function probe(i) {",
+                      "  if (i >= ports.length) { console.warn('No notification-service replica answered on 18085-18088'); return; }",
+                      "  const base = 'http://localhost:' + ports[i];",
+                      "  pm.sendRequest({ url: base + '/actuator/health', method: 'GET' }, (err, res) => {",
+                      "    if (!err && res.code === 200) { pm.collectionVariables.set('notificationServiceUrl', base); console.log('notification-service at', base); }",
+                      "    else { probe(i + 1); }",
+                      "  });",
+                      "}",
+                      "probe(0);"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 404 means no record has been counted yet for this group: treat as 0.",
+                      "const count = pm.response.code === 404 ? 0 : pm.response.json().measurements.find(m => m.statistic === 'COUNT').value;",
+                      "pm.test('metric endpoint answered (200, or 404 = nothing consumed yet)', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                      "const delta = count - Number(pm.collectionVariables.get('baselineNotification') || 0);",
+                      "const created = Number(pm.collectionVariables.get('created18') || 0);",
+                      "console.log('notification-service: consumed since baseline =', delta, 'created =', created);",
+                      "pm.test('folder 1b created at least one transaction', () => pm.expect(created).to.be.above(0));",
+                      "pm.test('notification-service consumed every transaction created in 1b (own consumer group)', () => pm.expect(delta).to.be.at.least(created));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "1c.2 analytics-service consumed all",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{analyticsServiceUrl}}/actuator/metrics/spendwise.kafka.records.consumed?tag=group:analytics-service&tag=outcome:success",
+                  "host": [
+                    "{{analyticsServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "spendwise.kafka.records.consumed"
+                  ],
+                  "query": [
+                    {
+                      "key": "tag",
+                      "value": "group:analytics-service"
+                    },
+                    {
+                      "key": "tag",
+                      "value": "outcome:success"
+                    }
+                  ]
+                },
+                "description": "Compared with 1a.2."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 404 means no record has been counted yet for this group: treat as 0.",
+                      "const count = pm.response.code === 404 ? 0 : pm.response.json().measurements.find(m => m.statistic === 'COUNT').value;",
+                      "pm.test('metric endpoint answered (200, or 404 = nothing consumed yet)', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                      "const delta = count - Number(pm.collectionVariables.get('baselineAnalytics') || 0);",
+                      "const created = Number(pm.collectionVariables.get('created18') || 0);",
+                      "console.log('analytics-service: consumed since baseline =', delta, 'created =', created);",
+                      "pm.test('folder 1b created at least one transaction', () => pm.expect(created).to.be.above(0));",
+                      "pm.test('analytics-service consumed every transaction created in 1b (own consumer group)', () => pm.expect(delta).to.be.at.least(created));"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "2. One instance per group owns all 3 partitions",
+          "description": "Before scaling: a group with one member gets every partition.",
+          "item": [
+            {
+              "name": "2.1 notification-service assignments",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{notificationServiceUrl}}/actuator/kafkaassignments",
+                  "host": [
+                    "{{notificationServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "kafkaassignments"
+                  ]
+                },
+                "description": "Single replica: owns transaction-events-0, -1 and -2."
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// Docker assigns ports from 18085-18088 round-robin, so after a restart the",
+                      "// single replica may not be on 18085. Find whichever port answers.",
+                      "const ports = [18085, 18086, 18087, 18088];",
+                      "function probe(i) {",
+                      "  if (i >= ports.length) { console.warn('No notification-service replica answered on 18085-18088'); return; }",
+                      "  const base = 'http://localhost:' + ports[i];",
+                      "  pm.sendRequest({ url: base + '/actuator/health', method: 'GET' }, (err, res) => {",
+                      "    if (!err && res.code === 200) { pm.collectionVariables.set('notificationServiceUrl', base); console.log('notification-service at', base); }",
+                      "    else { probe(i + 1); }",
+                      "  });",
+                      "}",
+                      "probe(0);"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                      "const l = pm.response.json().listeners.find(x => x.listenerId === 'transaction-alerts');",
+                      "pm.test('group notification-service', () => pm.expect(l.groupId).to.eql('notification-service'));",
+                      "pm.test('owns all 3 partitions', () => pm.expect(l.assignedPartitions).to.eql(['transaction-events-0', 'transaction-events-1', 'transaction-events-2']));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "2.2 analytics-service assignments",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{analyticsServiceUrl}}/actuator/kafkaassignments",
+                  "host": [
+                    "{{analyticsServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "kafkaassignments"
+                  ]
+                },
+                "description": "Its own group, also owning all 3 partitions \u2014 independently of notification-service."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                      "const l = pm.response.json().listeners.find(x => x.listenerId === 'transaction-ingestion');",
+                      "pm.test('group analytics-service', () => pm.expect(l.groupId).to.eql('analytics-service'));",
+                      "pm.test('owns all 3 partitions', () => pm.expect(l.assignedPartitions).to.eql(['transaction-events-0', 'transaction-events-1', 'transaction-events-2']));"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "3. Chaos lab - 4 replicas, 3 partitions",
+          "description": "Step A (Git Bash): docker compose up -d --scale notification-service=4 notification-service. Wait until docker compose ps notification-service shows 4 healthy, then ~15 s for the rebalance. Run this folder: 3.5 must pass with 4 live, 1 idle. Step B: pick a replica that owns a partition (its 3.x response, or the Console), find its container with docker compose ps notification-service (match the 1808x port), and run docker kill <name> (a crash: the group notices after session.timeout.ms = 10 s) or docker stop <name> (a clean leave: immediate). Wait ~15 s, run the folder again: 3.5 must pass with 3 live, 0 idle \u2014 the idle replica took over the orphaned partition. If Docker restarts a killed container (restart policy), that is a further rebalance; run the folder again once it is healthy and 3.5 returns to 4 live, 1 idle. Finish with docker compose up -d --scale notification-service=1 notification-service.",
+          "item": [
+            {
+              "name": "3.1 Replica on :18085 - which partitions does it own?",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "http://localhost:18085/actuator/kafkaassignments",
+                  "host": [
+                    "http://localhost:18085"
+                  ],
+                  "path": [
+                    "actuator",
+                    "kafkaassignments"
+                  ]
+                },
+                "description": "Asks the notification-service replica published on host port 18085. After a kill, the killed replica's port fails to connect \u2014 expected; its variable stays empty, so 3.5 counts it as gone."
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.collectionVariables.set('assign_18085', '');"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                      "const body = pm.response.json();",
+                      "const listener = body.listeners.find(l => l.listenerId === 'transaction-alerts');",
+                      "pm.test('transaction-alerts listener present and running', () => { pm.expect(listener).to.exist; pm.expect(listener.running).to.eql(true); });",
+                      "pm.test('group is notification-service (one group for all replicas)', () => pm.expect(listener.groupId).to.eql('notification-service'));",
+                      "pm.collectionVariables.set('assign_18085', JSON.stringify({instance: body.instance, partitions: listener.assignedPartitions}));",
+                      "console.log(body.instance, listener.assignedPartitions);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "3.2 Replica on :18086 - which partitions does it own?",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "http://localhost:18086/actuator/kafkaassignments",
+                  "host": [
+                    "http://localhost:18086"
+                  ],
+                  "path": [
+                    "actuator",
+                    "kafkaassignments"
+                  ]
+                },
+                "description": "Asks the notification-service replica published on host port 18086. After a kill, the killed replica's port fails to connect \u2014 expected; its variable stays empty, so 3.5 counts it as gone."
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.collectionVariables.set('assign_18086', '');"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                      "const body = pm.response.json();",
+                      "const listener = body.listeners.find(l => l.listenerId === 'transaction-alerts');",
+                      "pm.test('transaction-alerts listener present and running', () => { pm.expect(listener).to.exist; pm.expect(listener.running).to.eql(true); });",
+                      "pm.test('group is notification-service (one group for all replicas)', () => pm.expect(listener.groupId).to.eql('notification-service'));",
+                      "pm.collectionVariables.set('assign_18086', JSON.stringify({instance: body.instance, partitions: listener.assignedPartitions}));",
+                      "console.log(body.instance, listener.assignedPartitions);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "3.3 Replica on :18087 - which partitions does it own?",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "http://localhost:18087/actuator/kafkaassignments",
+                  "host": [
+                    "http://localhost:18087"
+                  ],
+                  "path": [
+                    "actuator",
+                    "kafkaassignments"
+                  ]
+                },
+                "description": "Asks the notification-service replica published on host port 18087. After a kill, the killed replica's port fails to connect \u2014 expected; its variable stays empty, so 3.5 counts it as gone."
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.collectionVariables.set('assign_18087', '');"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                      "const body = pm.response.json();",
+                      "const listener = body.listeners.find(l => l.listenerId === 'transaction-alerts');",
+                      "pm.test('transaction-alerts listener present and running', () => { pm.expect(listener).to.exist; pm.expect(listener.running).to.eql(true); });",
+                      "pm.test('group is notification-service (one group for all replicas)', () => pm.expect(listener.groupId).to.eql('notification-service'));",
+                      "pm.collectionVariables.set('assign_18087', JSON.stringify({instance: body.instance, partitions: listener.assignedPartitions}));",
+                      "console.log(body.instance, listener.assignedPartitions);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "3.4 Replica on :18088 - which partitions does it own?",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "http://localhost:18088/actuator/kafkaassignments",
+                  "host": [
+                    "http://localhost:18088"
+                  ],
+                  "path": [
+                    "actuator",
+                    "kafkaassignments"
+                  ]
+                },
+                "description": "Asks the notification-service replica published on host port 18088. After a kill, the killed replica's port fails to connect \u2014 expected; its variable stays empty, so 3.5 counts it as gone."
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.collectionVariables.set('assign_18088', '');"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                      "const body = pm.response.json();",
+                      "const listener = body.listeners.find(l => l.listenerId === 'transaction-alerts');",
+                      "pm.test('transaction-alerts listener present and running', () => { pm.expect(listener).to.exist; pm.expect(listener.running).to.eql(true); });",
+                      "pm.test('group is notification-service (one group for all replicas)', () => pm.expect(listener.groupId).to.eql('notification-service'));",
+                      "pm.collectionVariables.set('assign_18088', JSON.stringify({instance: body.instance, partitions: listener.assignedPartitions}));",
+                      "console.log(body.instance, listener.assignedPartitions);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "3.5 Verify the group's assignment",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/actuator/health",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "health"
+                  ]
+                },
+                "description": "Gateway health is only the carrier for this request's Tests, which combine 3.1-3.4: every partition owned exactly once, and idle replicas = live replicas - 3."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('carrier request OK', () => pm.response.to.have.status(200));",
+                      "const ports = [18085, 18086, 18087, 18088];",
+                      "const live = ports.map(p => pm.collectionVariables.get('assign_' + p)).filter(v => v).map(v => JSON.parse(v));",
+                      "const owned = live.flatMap(r => r.partitions);",
+                      "const idle = live.filter(r => r.partitions.length === 0);",
+                      "console.log('live replicas:', live.length, 'idle:', idle.map(r => r.instance), 'owned:', owned);",
+                      "pm.test('at least one replica answered', () => pm.expect(live.length).to.be.above(0));",
+                      "pm.test('all 3 partitions are owned', () => pm.expect(new Set(owned).size).to.eql(3));",
+                      "pm.test('no partition is owned by two replicas', () => pm.expect(owned.length).to.eql(new Set(owned).size));",
+                      "pm.test('idle replicas = live replicas - 3 (never negative)', () => pm.expect(idle.length).to.eql(Math.max(0, live.length - 3)));",
+                      "if (live.length === 4) { pm.test('4 replicas: exactly one idles', () => pm.expect(idle.length).to.eql(1)); }",
+                      "if (live.length === 3) { pm.test('3 replicas: each owns exactly one partition', () => live.forEach(r => pm.expect(r.partitions.length).to.eql(1))); }"
                     ]
                   }
                 }

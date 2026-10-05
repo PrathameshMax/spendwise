@@ -27,6 +27,49 @@ management:
           include: livenessState,deadlock
 
 spring:
+  # Milestone 18 — Kafka client settings shared by every service that talks to
+  # the cluster, set once here instead of per service. Inert in services
+  # without spring-kafka on the classpath. bootstrap-servers moved here from
+  # transaction-service.yml (Milestone 17): the ${VAR:...} default lists the
+  # three brokers' host-published ports for `mvn spring-boot:run`;
+  # docker-compose.yml sets KAFKA_BOOTSTRAP_SERVERS to the in-network listeners.
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:29092,localhost:39092,localhost:49092}
+    consumer:
+      # One consumer group per service, named after the service: two services
+      # on the same topic each receive every record (independent groups);
+      # replicas of one service share the records (one group).
+      group-id: ${spring.application.name}
+      # Where a group with no committed offset starts. earliest = from the
+      # beginning of the topic, so a group's first start (or a newly added
+      # consumer service) sees events published before it existed.
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      properties:
+        # Incremental (cooperative) rebalancing: when a member joins or leaves,
+        # only the partitions that must move are revoked; everyone else keeps
+        # consuming through the rebalance. The eager default stops the whole
+        # group, revokes every partition, and reassigns from scratch.
+        partition.assignment.strategy: org.apache.kafka.clients.consumer.CooperativeStickyAssignor
+        # How long the group waits for a member that stopped heartbeating
+        # (killed, not shut down cleanly) before reassigning its partitions.
+        # 10s instead of the 45s client default, so the chaos lab's kill is
+        # observable in seconds; heartbeat at roughly a third of it.
+        session.timeout.ms: 10000
+        heartbeat.interval.ms: 3000
+    listener:
+      # Commit each record's offset right after it is processed, so a crash
+      # redelivers at most the record in flight rather than the rest of a
+      # polled batch. Still at-least-once: Milestone 19 handles the redelivery.
+      ack-mode: record
+      # One consumer thread per instance, so "instances" and "group members"
+      # are the same number — the chaos lab's four instances are four members.
+      concurrency: 1
+      # Continues the producer's trace from the record's traceparent header
+      # (KafkaTemplate observation, Milestone 17): publish and consume are one
+      # trace in Zipkin.
+      observation-enabled: true
   jpa:
     open-in-view: false
     hibernate:
@@ -133,6 +176,12 @@ resilience4j:
         cancel-running-future: true
 
 spendwise:
+  # Milestone 18 — topic names consumers subscribe to (@KafkaListener topics
+  # placeholders). transaction-service's producer reads its own topic from
+  # spendwise.outbox.publisher.topic; both must say transaction-events.
+  kafka:
+    topics:
+      transaction-events: transaction-events
   security:
     # Shared only between the API Gateway (signs) and business services (verify) —
     # HMAC key for the X-User-Context header (Milestone 6). Override via env var

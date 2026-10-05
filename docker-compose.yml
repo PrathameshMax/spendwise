@@ -415,20 +415,44 @@ services:
           cpus: "1.0"
           memory: 512M
 
+  # Milestone 18 — scalable for the consumer-group chaos lab
+  # (`docker compose up -d --scale notification-service=4`), which is why it is
+  # the one service with no container_name (Compose cannot give four
+  # containers the same name; they become spendwise-notification-service-1..4)
+  # and a host port *range*: each replica is published on its own host port
+  # from 18085-18088, so Postman can ask each one which partitions it owns
+  # (/actuator/kafkaassignments). Not 8085-8088: that range would overlap
+  # analytics-service's 8086. With one replica it gets 18085; the container
+  # port is still 8085, so in-network callers and Prometheus are unaffected.
+  # Memory limit lowered to 384M (this service holds no data and runs one
+  # consumer) so four replicas fit on a laptop-sized Docker VM.
   notification-service:
     build:
       context: .
       dockerfile: notification-service/Dockerfile
-    container_name: spendwise-notification-service
     ports:
-      - "8085:8085"
+      - "18085-18088:8085"
     environment:
       CONFIG_SERVER_URL: http://config-server:8888
       EUREKA_HOST: discovery-server
       MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
+      KAFKA_BOOTSTRAP_SERVERS: kafka-1:19092,kafka-2:19092,kafka-3:19092
+      # Overrides the Dockerfile's MaxRAMPercentage=75: at a 384M limit that
+      # would leave ~96M for metaspace, threads and buffers, and the container
+      # (not the VM) would be OOM-killed (exit 137) under load. 60% keeps
+      # ~150M outside the heap.
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=60.0 -XX:+ExitOnOutOfMemoryError"
     depends_on:
       config-server:
         condition: service_healthy
+      # Started with, not gated on, the cluster: a consumer that starts before
+      # the brokers are reachable simply keeps retrying and joins once they are.
+      kafka-1:
+        condition: service_started
+      kafka-2:
+        condition: service_started
+      kafka-3:
+        condition: service_started
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8085/actuator/health"]
@@ -437,7 +461,7 @@ services:
       resources:
         limits:
           cpus: "1.0"
-          memory: 512M
+          memory: 384M
 
   analytics-service:
     build:
@@ -460,6 +484,9 @@ services:
       # compose service name, the same *_SERVICE_HOST override pattern
       # api-gateway's own Feign/HTTP routes have used since Milestone 9.
       BUDGET_SERVICE_HOST: budget-service
+      # Milestone 18 — in-network listeners of the three brokers, for this
+      # service's own consumer group on transaction-events.
+      KAFKA_BOOTSTRAP_SERVERS: kafka-1:19092,kafka-2:19092,kafka-3:19092
     depends_on:
       config-server:
         condition: service_healthy
@@ -467,6 +494,12 @@ services:
         condition: service_completed_successfully
       budget-service:
         condition: service_healthy
+      kafka-1:
+        condition: service_started
+      kafka-2:
+        condition: service_started
+      kafka-3:
+        condition: service_started
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8086/actuator/health"]

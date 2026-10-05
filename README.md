@@ -60,6 +60,7 @@ memory limits included.
 docker compose up -d --build
 # api-gateway:            http://localhost:8080
 # each service also still reachable directly: 8081 (auth) .. 8086 (analytics), 8888 (config-server)
+# notification-service (Milestone 18, scalable): 18085, or 18085-18088 when scaled to 4
 # service registry: http://localhost:8761 (Eureka dashboard — registered instances)
 # traces:      http://localhost:9411
 # metrics:     http://localhost:9090 (Prometheus)
@@ -1863,7 +1864,200 @@ Postgres client (DBeaver, pgAdmin) to `localhost:5432`, database
 folder 1 have `processed_at` and `correlation_id` set. During folder 2's
 outage, the new row's `processed_at` stays empty until the brokers return.
 
-Next: Milestone 18 — Mass Scale Ingestion (Consumer Groups & Rebalancing).
+**Milestone 18 complete** — Mass Scale Ingestion (Consumer Groups &
+Rebalancing). Scoped to the roadmap's sentence: independent `@KafkaListener`s
+in notification-service and analytics-service, each with its own `group.id`,
+consuming the same `transaction-events` topic in parallel for different
+purposes. Plus the chaos lab: four instances of one consumer group against
+three partitions, then kill an active one. No fixes were raised validating
+Milestone 17. Deliberately out of scope here:
+
+- consumer-side idempotency — Milestone 19;
+- dead-letter routing — Milestone 20;
+- analytics projections — Milestone 23;
+- budget-service consuming the topic — Milestone 24.
+
+**Consumer settings, once for every service — `config-repo/application.yml`.**
+
+| Setting | Why |
+| --- | --- |
+| `group-id: ${spring.application.name}` | Each service is its own group automatically, so two services on one topic each get every record, while replicas of one service share them. |
+| `auto-offset-reset: earliest` | A new group starts from the beginning of the topic, so Milestone 17's already-published events are consumed. Milestone 23's replay depends on this. |
+| `CooperativeStickyAssignor` | Incremental rebalancing: only partitions that must move are revoked, and everyone else keeps consuming. The eager default revokes everything from everyone. |
+| `session.timeout.ms: 10000`, `heartbeat.interval.ms: 3000` | The group notices a killed member in 10 s instead of 45 s. |
+| `ack-mode: record` | The offset is committed after each record, so a crash redelivers at most the record in flight. |
+| `concurrency: 1` | One consumer thread per instance, so instances and group members are the same count in the chaos lab. |
+| `observation-enabled: true` | The listener continues the producer's trace from `traceparent`. |
+
+`bootstrap-servers` moved here from transaction-service.yml. The topic name
+for listeners is `spendwise.kafka.topics.transaction-events`.
+
+**`TransactionAlertListener`** (new, `notification-service/.../messaging`)
+turns each `TransactionCreatedEvent` into a user alert. Dispatch is
+simulated: a `[SIMULATED PUSH]` log line. Real channels and the idempotency
+store that guards them come later.
+- It skips any other event type on the topic, so Milestone 21's reversal
+  events can't be mistaken for new transactions.
+- An unparseable payload is rethrown. The default error handler retries it,
+  then logs and skips it; Milestone 20 sends it to a dead-letter topic instead.
+- `idIsGroup = false` matters: by default Spring Kafka uses the listener's
+  `id` as its group id, which would have silently replaced
+  `notification-service` with `transaction-alerts`.
+
+**`TransactionIngestionListener`** (new, `analytics-service/.../messaging`)
+is the entry point of the read side. It consumes the same records in its own
+group (`analytics-service`) and logs each event with the dimensions the read
+models will key on: user, month, category, base amount. Storing projections
+is Milestone 23. It runs on a listener container's own consumer thread,
+never on Netty's event loop, so plain blocking code is fine in this WebFlux
+service.
+
+**Two `TransactionCreatedEvent` records** (new, one per consumer service)
+follow the platform's per-consumer contract rule, and deliberately differ:
+- each declares only the fields it uses — analytics keeps `categoryId` and
+  `baseCurrencyAmount`, notification doesn't;
+- each is a tolerant reader: `@JsonIgnoreProperties(ignoreUnknown = true)`,
+  and `type` is a `String` rather than a copy of the producer's enum, so
+  producer-side additions can't break either consumer.
+
+notification-service also gets tracing dependencies, skipped at Milestone 3
+because it had no entry point to trace until now.
+
+**Shared consumer infrastructure — `spendwise-common/.../messaging`.**
+Spring Boot applies a single `RecordInterceptor<Object,Object>` bean and a
+single `ConsumerAwareRebalanceListener` bean to its listener container
+factory, checked against Boot 3.4.1's `KafkaAnnotationDrivenConfiguration`.
+So these are written once, like `CorrelationIdFilter`:
+
+- **`CorrelationIdRecordInterceptor`** — puts the record's
+  `X-Correlation-ID` header into the MDC before the listener runs and
+  removes it in `afterRecord`, on the same consumer thread. One search on a
+  correlation id now finds the HTTP request, the outbox publish, and both
+  consumers. It also counts `spendwise.kafka.records.consumed`, tagged by
+  group, topic, partition, event type and outcome; the partition tag makes
+  each instance's share visible through `/actuator/metrics`.
+- **`PartitionAssignmentLoggingListener`** — logs partitions newly
+  assigned, revoked, and lost (the unclean case, after a missed session
+  timeout), so a rebalance can be read in `docker compose logs`.
+- **`KafkaAssignmentsEndpoint`** — `GET /actuator/kafkaassignments`: the
+  partitions this instance owns right now, and its container hostname. This
+  is what lets Postman check the chaos lab directly. Exposed only on
+  notification-service and analytics-service.
+- **`EventHeaders`** — the envelope header names (`outboxEventId`,
+  `eventType`, `aggregateType`), now used by `OutboxPublisher` too, so
+  producer and consumers can't drift on a name. Payload types stay
+  per-service.
+- **`SpendwiseKafkaConsumerAutoConfiguration`** wires all of this. It is
+  conditional on spring-kafka being on the classpath (declared `optional` in
+  this module) and ordered before `KafkaAutoConfiguration`. The meter
+  registry is resolved through `ObjectProvider` rather than a bean
+  condition, which could silently drop the interceptor depending on
+  auto-configuration order.
+
+**`docker-compose.yml`.**
+- notification-service is now scalable: no `container_name` (Compose names
+  replicas `spendwise-notification-service-1..4`), and a host port *range*,
+  `18085-18088`, so each replica is reachable from Postman.
+- It is no longer published on 8085, because the range `8085-8088` would
+  have overlapped analytics-service's 8086. The container port is unchanged,
+  so Prometheus and in-network callers are unaffected.
+- Its memory limit drops to 384 MB so four replicas fit.
+- Both consumers get `KAFKA_BOOTSTRAP_SERVERS` and
+  `depends_on: service_started` on the brokers. A consumer that starts
+  before the cluster just keeps retrying.
+
+**Q58: What are Kafka Consumer Group mechanics, and how do partition
+allocations scale?** A consumer group is a set of consumers sharing one
+`group.id`. The broker-side group coordinator assigns each partition of the
+subscribed topics to exactly one member of the group, and tracks the group's
+committed offset per partition. That gives two rules:
+
+- **Within a group, records are divided.** Each partition has one owner, so
+  per-partition order is preserved and work is spread out.
+- **Across groups, records are copied.** Each group has its own offsets, so
+  notification-service and analytics-service both read every record, at
+  their own pace, without affecting each other.
+
+Scaling follows from the partition count. Parallelism inside a group is
+capped at the number of partitions: with 3 partitions, members 1–3 each own
+partitions, and a 4th member owns nothing. It isn't useless, though — it is
+a hot standby that takes over the moment an owner disappears, which is the
+chaos lab.
+
+Membership changes trigger a rebalance:
+- **join** — a new instance;
+- **leave** — clean shutdown, immediate;
+- **missed heartbeats** — a crash, detected after `session.timeout.ms`.
+
+With the cooperative-sticky assignor, a rebalance is incremental: only the
+moved partitions pause.
+
+To scale consumption past one partition per consumer, add partitions. But
+changing the partition count changes which partition a key hashes to, which
+breaks per-key ordering for in-flight keys. So partitions are sized for
+expected peak parallelism up front. Consumer lag per partition (Kafka UI →
+Consumers) is the signal to scale.
+
+### Validating Milestone 18
+
+An independent review of the diff, needed because none of this could be
+compiled where it was written, found four issues, fixed before handover:
+
+- **Port drift.** Docker hands out ports from a range round-robin, not
+  lowest-free, so a recreated notification-service replica can land on
+  18086–18088. The Postman requests that use `notificationServiceUrl` now
+  find the live port themselves; `docker compose port notification-service 8085`
+  shows it from the terminal. Scaling with a port range needs Docker Compose
+  2.17.3 or newer (current Docker Desktop is).
+- **JVM headroom.** At a 384 MB limit, the image's `MaxRAMPercentage=75`
+  left about 96 MB outside the heap. Compose now sets 60% for this service.
+- **Prometheus.** A static `notification-service:8085` target scrapes one
+  replica per scrape, chosen at random. It is now a `dns_sd_configs` job, so
+  each replica is its own target.
+- **Endpoint race.** `getAssignedPartitions()` is a live view that the
+  consumer thread mutates during a rebalance. The endpoint now copies it with
+  a retry instead of risking a `ConcurrentModificationException` (a 500).
+
+Like Milestone 17, this was written in a sandbox with no Maven Central,
+Docker Hub or Docker daemon, so step 0 is its first real build. Verified
+there: all YAML/XML/JSON parses, `docker compose config` passes, and there
+are no host-port overlaps (port ranges expanded). Every new spring-kafka,
+kafka-clients and Boot API was checked against source at the versions in use.
+
+**Step 0 — build and start (Git Bash).**
+```bash
+cd /d/spendwise
+./mvnw clean test-compile
+docker compose up -d --build
+docker compose --profile tools up -d kafka-ui
+docker compose logs notification-service | grep "Partitions newly assigned"
+docker compose logs analytics-service | grep "Partitions newly assigned"
+```
+Each `grep` should show the three `transaction-events` partitions assigned
+to that service's single instance.
+
+**Steps 1–3 — Postman, folder `Milestone 18 - Test Plan`.**
+`notificationServiceUrl` is now `http://localhost:18085`.
+
+| Folder | What it proves | Expected |
+| --- | --- | --- |
+| 0. Setup | token, profile, category | all `201` |
+| 1a → 1b (Runner, 10×) → 1c | two groups, every record each | both services' `spendwise.kafka.records.consumed` rise by at least the number created; Kafka UI → Consumers shows both groups at lag 0 |
+| 2. One instance per group | single member owns everything | `notification-service` and `analytics-service` groups each own `transaction-events-0, -1, -2` |
+| 3. Chaos lab | rebalance, idle standby, healing | after scaling to 4: every partition owned once, exactly one replica idle; after killing an owner: 3 replicas, each owning one — the idle replica took over |
+
+Folder 3's description has the three Git Bash steps: scale to 4, kill an
+owner, scale back to 1. During the lab, `docker compose logs -f
+notification-service` shows each rebalance: `Partitions newly assigned …`,
+`Partitions revoked …`, and, after `docker kill`, the survivors picking up
+the orphaned partition about 10 s later.
+
+Memory: four notification replicas at 384 MB each, on top of the full stack
+and Kafka UI, can exceed a 5.6 GB Docker VM. If containers restart with exit
+code 137 during the lab, raise the WSL 2 VM's memory: `%UserProfile%\.wslconfig`
+with `[wsl2]` / `memory=8GB`, then `wsl --shutdown` and restart Docker Desktop.
+
+Next: Milestone 19 — Distributed Idempotency Layers.
 
 ## API Versioning & Deprecation Policy
 

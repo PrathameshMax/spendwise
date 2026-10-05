@@ -75,6 +75,14 @@
             <groupId>org.springframework.cloud</groupId>
             <artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>
         </dependency>
+        <!-- Milestone 18 — @KafkaListener on transaction-events, in its own consumer
+             group. Plain spring-kafka, not reactor-kafka, even in this WebFlux
+             service: listener containers run on their own consumer threads, never on
+             Netty's event loop, so a synchronous listener cannot block HTTP serving. -->
+        <dependency>
+            <groupId>org.springframework.kafka</groupId>
+            <artifactId>spring-kafka</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>

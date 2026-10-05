@@ -6,11 +6,9 @@ spring:
   flyway:
     enabled: true
   # Milestone 17 — producer side of the outbox relay (OutboxPublisher).
-  # The ${VAR:...} default lists the three brokers' host-published ports for
-  # `mvn spring-boot:run` on the host; docker-compose.yml overrides it with the
-  # in-network listener (kafka-N:19092), same pattern as DB_HOST.
+  # bootstrap-servers is shared platform-wide in config-repo/application.yml
+  # (moved there at Milestone 18, when the first consumers arrived).
   kafka:
-    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:29092,localhost:39092,localhost:49092}
     producer:
       # acks=all + idempotence: the broker acknowledges only once every
       # in-sync replica (min.insync.replicas=2 on the topic) has the record,

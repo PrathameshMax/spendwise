@@ -32,12 +32,27 @@ scrape_configs:
       - targets: ["budget-service:8084"]
         labels:
           service: budget-service
-      - targets: ["notification-service:8085"]
-        labels:
-          service: notification-service
       - targets: ["analytics-service:8086"]
         labels:
           service: analytics-service
+
+  # Milestone 18 — notification-service can run as several replicas (the
+  # consumer-group chaos lab scales it to 4). A static target resolves the
+  # compose service name to one replica per scrape, so counters from
+  # different replicas would interleave in one series. DNS service discovery
+  # (Docker's embedded DNS returns one A record per replica) scrapes every
+  # replica as its own target instead; the `service` label matches the
+  # static jobs above so dashboards and alerts treat it the same.
+  - job_name: spendwise-notification-service
+    metrics_path: /actuator/prometheus
+    dns_sd_configs:
+      - names: ["notification-service"]
+        type: A
+        port: 8085
+        refresh_interval: 15s
+    relabel_configs:
+      - target_label: service
+        replacement: notification-service
 
   - job_name: spendwise-config-server
     metrics_path: /actuator/prometheus

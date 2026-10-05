@@ -28,6 +28,25 @@
             <groupId>org.springframework.cloud</groupId>
             <artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>
         </dependency>
+        <!-- Milestone 18 — this service's first inbound path: a @KafkaListener on
+             transaction-events. Version managed by spring-boot-dependencies. -->
+        <dependency>
+            <groupId>org.springframework.kafka</groupId>
+            <artifactId>spring-kafka</artifactId>
+        </dependency>
+        <!-- Milestone 18 — tracing, skipped for this service at Milestone 3 because
+             it had no entry point to trace. With spring.kafka.listener.observation-enabled
+             the listener now continues the producer's trace from the record's
+             traceparent header, so a published event and its consumption are one trace
+             in Zipkin. Same pair transaction-service uses. -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-tracing-bridge-otel</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-zipkin</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>

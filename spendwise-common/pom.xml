@@ -106,5 +106,22 @@
             <artifactId>feign-core</artifactId>
             <optional>true</optional>
         </dependency>
+        <!-- Milestone 18 — needed only to compile the messaging package
+             (SpendwiseKafkaConsumerAutoConfiguration and the record interceptor,
+             rebalance listener and actuator endpoint it registers). Optional, same
+             as feign-core above: services without spring-kafka never get it, and
+             the auto-configuration is @ConditionalOnClass on it. -->
+        <dependency>
+            <groupId>org.springframework.kafka</groupId>
+            <artifactId>spring-kafka</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <!-- Milestone 18 — Counter/MeterRegistry for the consumed-records metric.
+             Every consuming service already has it through spring-boot-starter-actuator. -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-core</artifactId>
+            <optional>true</optional>
+        </dependency>
     </dependencies>
 </project>
