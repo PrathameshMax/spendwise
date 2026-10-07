@@ -18,3 +18,5 @@ SELECT 'CREATE DATABASE user_db' WHERE NOT EXISTS (SELECT FROM pg_database WHERE
 SELECT 'CREATE DATABASE transaction_db' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'transaction_db')\gexec
 SELECT 'CREATE DATABASE budget_db' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'budget_db')\gexec
 SELECT 'CREATE DATABASE analytics_db' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'analytics_db')\gexec
+-- Milestone 19 — notification-service's idempotency store and alert log.
+SELECT 'CREATE DATABASE notification_db' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'notification_db')\gexec

@@ -125,6 +125,46 @@
       "key": "assign_18088",
       "value": "",
       "description": "Milestone 18 chaos lab: partitions owned by the replica on host port 18088."
+    },
+    {
+      "key": "m19_notifProcessed_base",
+      "value": "",
+      "description": "Milestone 19 test plan counter snapshot."
+    },
+    {
+      "key": "m19_notifProcessed_afterCreate",
+      "value": "",
+      "description": "Milestone 19 test plan counter snapshot."
+    },
+    {
+      "key": "m19_notifDuplicate_base",
+      "value": "",
+      "description": "Milestone 19 test plan counter snapshot."
+    },
+    {
+      "key": "m19_notifDuplicate_afterCreate",
+      "value": "",
+      "description": "Milestone 19 test plan counter snapshot."
+    },
+    {
+      "key": "m19_analyticsProcessed_base",
+      "value": "",
+      "description": "Milestone 19 test plan counter snapshot."
+    },
+    {
+      "key": "m19_analyticsProcessed_afterCreate",
+      "value": "",
+      "description": "Milestone 19 test plan counter snapshot."
+    },
+    {
+      "key": "m19_analyticsDuplicate_base",
+      "value": "",
+      "description": "Milestone 19 test plan counter snapshot."
+    },
+    {
+      "key": "m19_analyticsDuplicate_afterCreate",
+      "value": "",
+      "description": "Milestone 19 test plan counter snapshot."
     }
   ],
   "item": [
@@ -3906,6 +3946,942 @@
                       "pm.test('idle replicas = live replicas - 3 (never negative)', () => pm.expect(idle.length).to.eql(Math.max(0, live.length - 3)));",
                       "if (live.length === 4) { pm.test('4 replicas: exactly one idles', () => pm.expect(idle.length).to.eql(1)); }",
                       "if (live.length === 3) { pm.test('3 replicas: each owns exactly one partition', () => live.forEach(r => pm.expect(r.partitions.length).to.eql(1))); }"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Milestone 19 - Test Plan",
+      "description": "Run the folders in order with notification-service at one replica. The test plan creates one transaction, checks that each consumer processed it exactly once, then makes transaction-service's outbox publish the very same event a second time \u2014 the real at-least-once duplicate Milestone 17 described (broker acknowledged, processed_at never committed) \u2014 and checks that both consumers recognised and discarded it. Counters come from spendwise.kafka.events.idempotency{consumer, outcome=processed|duplicate}.",
+      "item": [
+        {
+          "name": "0. Setup",
+          "description": "Token, profile and category. Run once.",
+          "item": [
+            {
+              "name": "0.1 Register (via Gateway)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/api/v1/auth/register",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "auth",
+                    "register"
+                  ]
+                },
+                "description": "Fresh email per run.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"m19-{{$timestamp}}@spendwise.dev\",\n  \"rawPassword\": \"ChangeMe123!\"\n}"
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                      "pm.collectionVariables.set('accessToken', pm.response.json().accessToken);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "0.2 Create user profile (via Gateway)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/api/v1/users",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "users"
+                  ]
+                },
+                "description": "Sets userId.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"m19-profile-{{$timestamp}}@spendwise.dev\",\n  \"fullName\": \"Milestone 19 Tester\",\n  \"preferredCurrency\": \"INR\"\n}"
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                      "pm.collectionVariables.set('userId', pm.response.json().id);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "0.3 Create category (via Gateway)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/api/v1/categories",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "categories"
+                  ]
+                },
+                "description": "Sets categoryId.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"M19 Travel {{$timestamp}}\"\n}"
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                      "pm.collectionVariables.set('categoryId', pm.response.json().id);"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "1. Baseline",
+          "description": "Current processed/duplicate counts for both consumers.",
+          "item": [
+            {
+              "name": "1.1 transaction-alerts processed - baseline",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{notificationServiceUrl}}/actuator/metrics/spendwise.kafka.events.idempotency?tag=consumer:transaction-alerts&tag=outcome:processed",
+                  "host": [
+                    "{{notificationServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "spendwise.kafka.events.idempotency"
+                  ],
+                  "query": [
+                    {
+                      "key": "tag",
+                      "value": "consumer:transaction-alerts"
+                    },
+                    {
+                      "key": "tag",
+                      "value": "outcome:processed"
+                    }
+                  ]
+                },
+                "description": "transaction-alerts: events with outcome=processed so far."
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// Docker assigns notification-service a port from 18085-18088; find the live one.",
+                      "const ports = [18085, 18086, 18087, 18088];",
+                      "function probe(i) {",
+                      "  if (i >= ports.length) { console.warn('No notification-service replica answered on 18085-18088'); return; }",
+                      "  const base = 'http://localhost:' + ports[i];",
+                      "  pm.sendRequest({ url: base + '/actuator/health', method: 'GET' }, (err, res) => {",
+                      "    if (!err && res.code === 200) { pm.collectionVariables.set('notificationServiceUrl', base); }",
+                      "    else { probe(i + 1); }",
+                      "  });",
+                      "}",
+                      "probe(0);"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 404 = no event has reached this outcome yet: count 0.",
+                      "const count = pm.response.code === 404 ? 0 : pm.response.json().measurements.find(m => m.statistic === 'COUNT').value;",
+                      "pm.test('metric endpoint answered (200, or 404 = zero so far)', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                      "pm.collectionVariables.set('m19_notifProcessed_base', count);",
+                      "console.log('transaction-alerts processed (base) =', count);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "1.2 transaction-alerts duplicate - baseline",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{notificationServiceUrl}}/actuator/metrics/spendwise.kafka.events.idempotency?tag=consumer:transaction-alerts&tag=outcome:duplicate",
+                  "host": [
+                    "{{notificationServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "spendwise.kafka.events.idempotency"
+                  ],
+                  "query": [
+                    {
+                      "key": "tag",
+                      "value": "consumer:transaction-alerts"
+                    },
+                    {
+                      "key": "tag",
+                      "value": "outcome:duplicate"
+                    }
+                  ]
+                },
+                "description": "transaction-alerts: events with outcome=duplicate so far."
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// Docker assigns notification-service a port from 18085-18088; find the live one.",
+                      "const ports = [18085, 18086, 18087, 18088];",
+                      "function probe(i) {",
+                      "  if (i >= ports.length) { console.warn('No notification-service replica answered on 18085-18088'); return; }",
+                      "  const base = 'http://localhost:' + ports[i];",
+                      "  pm.sendRequest({ url: base + '/actuator/health', method: 'GET' }, (err, res) => {",
+                      "    if (!err && res.code === 200) { pm.collectionVariables.set('notificationServiceUrl', base); }",
+                      "    else { probe(i + 1); }",
+                      "  });",
+                      "}",
+                      "probe(0);"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 404 = no event has reached this outcome yet: count 0.",
+                      "const count = pm.response.code === 404 ? 0 : pm.response.json().measurements.find(m => m.statistic === 'COUNT').value;",
+                      "pm.test('metric endpoint answered (200, or 404 = zero so far)', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                      "pm.collectionVariables.set('m19_notifDuplicate_base', count);",
+                      "console.log('transaction-alerts duplicate (base) =', count);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "1.3 transaction-ingestion processed - baseline",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{analyticsServiceUrl}}/actuator/metrics/spendwise.kafka.events.idempotency?tag=consumer:transaction-ingestion&tag=outcome:processed",
+                  "host": [
+                    "{{analyticsServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "spendwise.kafka.events.idempotency"
+                  ],
+                  "query": [
+                    {
+                      "key": "tag",
+                      "value": "consumer:transaction-ingestion"
+                    },
+                    {
+                      "key": "tag",
+                      "value": "outcome:processed"
+                    }
+                  ]
+                },
+                "description": "transaction-ingestion: events with outcome=processed so far."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 404 = no event has reached this outcome yet: count 0.",
+                      "const count = pm.response.code === 404 ? 0 : pm.response.json().measurements.find(m => m.statistic === 'COUNT').value;",
+                      "pm.test('metric endpoint answered (200, or 404 = zero so far)', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                      "pm.collectionVariables.set('m19_analyticsProcessed_base', count);",
+                      "console.log('transaction-ingestion processed (base) =', count);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "1.4 transaction-ingestion duplicate - baseline",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{analyticsServiceUrl}}/actuator/metrics/spendwise.kafka.events.idempotency?tag=consumer:transaction-ingestion&tag=outcome:duplicate",
+                  "host": [
+                    "{{analyticsServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "spendwise.kafka.events.idempotency"
+                  ],
+                  "query": [
+                    {
+                      "key": "tag",
+                      "value": "consumer:transaction-ingestion"
+                    },
+                    {
+                      "key": "tag",
+                      "value": "outcome:duplicate"
+                    }
+                  ]
+                },
+                "description": "transaction-ingestion: events with outcome=duplicate so far."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 404 = no event has reached this outcome yet: count 0.",
+                      "const count = pm.response.code === 404 ? 0 : pm.response.json().measurements.find(m => m.statistic === 'COUNT').value;",
+                      "pm.test('metric endpoint answered (200, or 404 = zero so far)', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                      "pm.collectionVariables.set('m19_analyticsDuplicate_base', count);",
+                      "console.log('transaction-ingestion duplicate (base) =', count);"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "2. Create one transaction",
+          "description": "Folder 3's first request waits 6 s itself before reading counters.",
+          "item": [
+            {
+              "name": "2.1 Create transaction",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/api/v1/transactions",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "transactions"
+                  ]
+                },
+                "description": "Its outbox row is published once; both consumers should process it once. The Console prints the SQL that folder 4 needs.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"userId\": \"{{userId}}\",\n  \"categoryId\": \"{{categoryId}}\",\n  \"amount\": 2500.0,\n  \"type\": \"EXPENSE\",\n  \"description\": \"Milestone 19 idempotency\",\n  \"transactionDate\": \"{{today}}\",\n  \"currency\": \"INR\"\n}"
+                }
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.collectionVariables.set('today', new Date().toISOString().slice(0, 10));"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                      "const id = pm.response.json().id;",
+                      "pm.collectionVariables.set('transactionId', id);",
+                      "console.log('Folder 4 SQL (transaction_db):\\nUPDATE outbox_events SET processed_at = NULL WHERE aggregate_id = \\'' + id + '\\';');"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "3. Processed exactly once",
+          "description": "processed +1 and duplicate +0, for each consumer.",
+          "item": [
+            {
+              "name": "3.1 transaction-alerts processed - after create",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{notificationServiceUrl}}/actuator/metrics/spendwise.kafka.events.idempotency?tag=consumer:transaction-alerts&tag=outcome:processed",
+                  "host": [
+                    "{{notificationServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "spendwise.kafka.events.idempotency"
+                  ],
+                  "query": [
+                    {
+                      "key": "tag",
+                      "value": "consumer:transaction-alerts"
+                    },
+                    {
+                      "key": "tag",
+                      "value": "outcome:processed"
+                    }
+                  ]
+                },
+                "description": "transaction-alerts: events with outcome=processed so far."
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// Give the outbox poll (1 s) and both consumers time to finish before",
+                      "// reading counters; the Collection Runner would otherwise read them instantly.",
+                      "setTimeout(() => {}, 6000);",
+                      "// Docker assigns notification-service a port from 18085-18088; find the live one.",
+                      "const ports = [18085, 18086, 18087, 18088];",
+                      "function probe(i) {",
+                      "  if (i >= ports.length) { console.warn('No notification-service replica answered on 18085-18088'); return; }",
+                      "  const base = 'http://localhost:' + ports[i];",
+                      "  pm.sendRequest({ url: base + '/actuator/health', method: 'GET' }, (err, res) => {",
+                      "    if (!err && res.code === 200) { pm.collectionVariables.set('notificationServiceUrl', base); }",
+                      "    else { probe(i + 1); }",
+                      "  });",
+                      "}",
+                      "probe(0);"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 404 = no event has reached this outcome yet: count 0.",
+                      "const count = pm.response.code === 404 ? 0 : pm.response.json().measurements.find(m => m.statistic === 'COUNT').value;",
+                      "pm.test('metric endpoint answered (200, or 404 = zero so far)', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                      "pm.collectionVariables.set('m19_notifProcessed_afterCreate', count);",
+                      "console.log('transaction-alerts processed (afterCreate) =', count);",
+                      "const delta = count - Number(pm.collectionVariables.get('m19_notifProcessed_base') || 0);",
+                      "pm.test('first delivery processed exactly once (delta = 1)', () => pm.expect(delta).to.eql(1));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "3.2 transaction-alerts duplicate - after create",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{notificationServiceUrl}}/actuator/metrics/spendwise.kafka.events.idempotency?tag=consumer:transaction-alerts&tag=outcome:duplicate",
+                  "host": [
+                    "{{notificationServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "spendwise.kafka.events.idempotency"
+                  ],
+                  "query": [
+                    {
+                      "key": "tag",
+                      "value": "consumer:transaction-alerts"
+                    },
+                    {
+                      "key": "tag",
+                      "value": "outcome:duplicate"
+                    }
+                  ]
+                },
+                "description": "transaction-alerts: events with outcome=duplicate so far."
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// Docker assigns notification-service a port from 18085-18088; find the live one.",
+                      "const ports = [18085, 18086, 18087, 18088];",
+                      "function probe(i) {",
+                      "  if (i >= ports.length) { console.warn('No notification-service replica answered on 18085-18088'); return; }",
+                      "  const base = 'http://localhost:' + ports[i];",
+                      "  pm.sendRequest({ url: base + '/actuator/health', method: 'GET' }, (err, res) => {",
+                      "    if (!err && res.code === 200) { pm.collectionVariables.set('notificationServiceUrl', base); }",
+                      "    else { probe(i + 1); }",
+                      "  });",
+                      "}",
+                      "probe(0);"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 404 = no event has reached this outcome yet: count 0.",
+                      "const count = pm.response.code === 404 ? 0 : pm.response.json().measurements.find(m => m.statistic === 'COUNT').value;",
+                      "pm.test('metric endpoint answered (200, or 404 = zero so far)', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                      "pm.collectionVariables.set('m19_notifDuplicate_afterCreate', count);",
+                      "console.log('transaction-alerts duplicate (afterCreate) =', count);",
+                      "const delta = count - Number(pm.collectionVariables.get('m19_notifDuplicate_base') || 0);",
+                      "pm.test('no duplicates yet (delta = 0)', () => pm.expect(delta).to.eql(0));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "3.3 transaction-ingestion processed - after create",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{analyticsServiceUrl}}/actuator/metrics/spendwise.kafka.events.idempotency?tag=consumer:transaction-ingestion&tag=outcome:processed",
+                  "host": [
+                    "{{analyticsServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "spendwise.kafka.events.idempotency"
+                  ],
+                  "query": [
+                    {
+                      "key": "tag",
+                      "value": "consumer:transaction-ingestion"
+                    },
+                    {
+                      "key": "tag",
+                      "value": "outcome:processed"
+                    }
+                  ]
+                },
+                "description": "transaction-ingestion: events with outcome=processed so far."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 404 = no event has reached this outcome yet: count 0.",
+                      "const count = pm.response.code === 404 ? 0 : pm.response.json().measurements.find(m => m.statistic === 'COUNT').value;",
+                      "pm.test('metric endpoint answered (200, or 404 = zero so far)', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                      "pm.collectionVariables.set('m19_analyticsProcessed_afterCreate', count);",
+                      "console.log('transaction-ingestion processed (afterCreate) =', count);",
+                      "const delta = count - Number(pm.collectionVariables.get('m19_analyticsProcessed_base') || 0);",
+                      "pm.test('first delivery processed exactly once (delta = 1)', () => pm.expect(delta).to.eql(1));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "3.4 transaction-ingestion duplicate - after create",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{analyticsServiceUrl}}/actuator/metrics/spendwise.kafka.events.idempotency?tag=consumer:transaction-ingestion&tag=outcome:duplicate",
+                  "host": [
+                    "{{analyticsServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "spendwise.kafka.events.idempotency"
+                  ],
+                  "query": [
+                    {
+                      "key": "tag",
+                      "value": "consumer:transaction-ingestion"
+                    },
+                    {
+                      "key": "tag",
+                      "value": "outcome:duplicate"
+                    }
+                  ]
+                },
+                "description": "transaction-ingestion: events with outcome=duplicate so far."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 404 = no event has reached this outcome yet: count 0.",
+                      "const count = pm.response.code === 404 ? 0 : pm.response.json().measurements.find(m => m.statistic === 'COUNT').value;",
+                      "pm.test('metric endpoint answered (200, or 404 = zero so far)', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                      "pm.collectionVariables.set('m19_analyticsDuplicate_afterCreate', count);",
+                      "console.log('transaction-ingestion duplicate (afterCreate) =', count);",
+                      "const delta = count - Number(pm.collectionVariables.get('m19_analyticsDuplicate_base') || 0);",
+                      "pm.test('no duplicates yet (delta = 0)', () => pm.expect(delta).to.eql(0));"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "4. Force the outbox to publish the same event again",
+          "description": "Not an HTTP step \u2014 this makes transaction-service re-send the event, exactly as it would after a crash between the broker's acknowledgment and the processed_at commit. Run the UPDATE printed in the Postman Console by 2.1, either in a DB client (localhost:5432, transaction_db, spendwise/spendwise) or in Git Bash: docker exec spendwise-postgres psql -U spendwise -d transaction_db -c \"UPDATE outbox_events SET processed_at = NULL WHERE aggregate_id = '<transactionId>'\". The publisher picks the row up within a second and publishes it again: a NEW record at a NEW offset, carrying the SAME outboxEventId header. Kafka UI > Topics > transaction-events > Messages shows the two records side by side. Then run folder 5 (its first request waits 6 s itself). Folder 4 is a manual stop: run folders 0-3 in the Runner, do the UPDATE, then run folder 5. (This folder holds one request, 4.1, only as a reminder: it checks the transaction still exists.)",
+          "item": [
+            {
+              "name": "4.1 The transaction is still there (reminder step)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/api/v1/transactions?userId={{userId}}&page=0&size=5",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "transactions"
+                  ],
+                  "query": [
+                    {
+                      "key": "userId",
+                      "value": "{{userId}}"
+                    },
+                    {
+                      "key": "page",
+                      "value": "0"
+                    },
+                    {
+                      "key": "size",
+                      "value": "5"
+                    }
+                  ]
+                },
+                "description": "Re-publishing does not touch the business row."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                      "pm.test('transaction listed once', () => pm.expect(pm.response.json().content.filter(t => t.id === pm.collectionVariables.get('transactionId')).length).to.eql(1));"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "5. Duplicate discarded",
+          "description": "duplicate +1 and processed +0, for each consumer: the second delivery was received (Milestone 18's spendwise.kafka.records.consumed rose too) but not acted on. In notification_db, SELECT count(*) FROM notification_log WHERE transaction_id = '<transactionId>' returns 1, and the service log shows 'Duplicate delivery of event ... discarded' with no second [SIMULATED PUSH] line.",
+          "item": [
+            {
+              "name": "5.1 transaction-alerts processed - after duplicate",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{notificationServiceUrl}}/actuator/metrics/spendwise.kafka.events.idempotency?tag=consumer:transaction-alerts&tag=outcome:processed",
+                  "host": [
+                    "{{notificationServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "spendwise.kafka.events.idempotency"
+                  ],
+                  "query": [
+                    {
+                      "key": "tag",
+                      "value": "consumer:transaction-alerts"
+                    },
+                    {
+                      "key": "tag",
+                      "value": "outcome:processed"
+                    }
+                  ]
+                },
+                "description": "transaction-alerts: events with outcome=processed so far."
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// Give the outbox poll (1 s) and both consumers time to finish before",
+                      "// reading counters; the Collection Runner would otherwise read them instantly.",
+                      "setTimeout(() => {}, 6000);",
+                      "// Docker assigns notification-service a port from 18085-18088; find the live one.",
+                      "const ports = [18085, 18086, 18087, 18088];",
+                      "function probe(i) {",
+                      "  if (i >= ports.length) { console.warn('No notification-service replica answered on 18085-18088'); return; }",
+                      "  const base = 'http://localhost:' + ports[i];",
+                      "  pm.sendRequest({ url: base + '/actuator/health', method: 'GET' }, (err, res) => {",
+                      "    if (!err && res.code === 200) { pm.collectionVariables.set('notificationServiceUrl', base); }",
+                      "    else { probe(i + 1); }",
+                      "  });",
+                      "}",
+                      "probe(0);"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 404 = no event has reached this outcome yet: count 0.",
+                      "const count = pm.response.code === 404 ? 0 : pm.response.json().measurements.find(m => m.statistic === 'COUNT').value;",
+                      "pm.test('metric endpoint answered (200, or 404 = zero so far)', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                      "console.log('transaction-alerts processed (afterDuplicate) =', count);",
+                      "const delta = count - Number(pm.collectionVariables.get('m19_notifProcessed_afterCreate') || 0);",
+                      "pm.test('redelivered event NOT processed again (delta = 0)', () => pm.expect(delta).to.eql(0));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "5.2 transaction-alerts duplicate - after duplicate",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{notificationServiceUrl}}/actuator/metrics/spendwise.kafka.events.idempotency?tag=consumer:transaction-alerts&tag=outcome:duplicate",
+                  "host": [
+                    "{{notificationServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "spendwise.kafka.events.idempotency"
+                  ],
+                  "query": [
+                    {
+                      "key": "tag",
+                      "value": "consumer:transaction-alerts"
+                    },
+                    {
+                      "key": "tag",
+                      "value": "outcome:duplicate"
+                    }
+                  ]
+                },
+                "description": "transaction-alerts: events with outcome=duplicate so far."
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// Docker assigns notification-service a port from 18085-18088; find the live one.",
+                      "const ports = [18085, 18086, 18087, 18088];",
+                      "function probe(i) {",
+                      "  if (i >= ports.length) { console.warn('No notification-service replica answered on 18085-18088'); return; }",
+                      "  const base = 'http://localhost:' + ports[i];",
+                      "  pm.sendRequest({ url: base + '/actuator/health', method: 'GET' }, (err, res) => {",
+                      "    if (!err && res.code === 200) { pm.collectionVariables.set('notificationServiceUrl', base); }",
+                      "    else { probe(i + 1); }",
+                      "  });",
+                      "}",
+                      "probe(0);"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 404 = no event has reached this outcome yet: count 0.",
+                      "const count = pm.response.code === 404 ? 0 : pm.response.json().measurements.find(m => m.statistic === 'COUNT').value;",
+                      "pm.test('metric endpoint answered (200, or 404 = zero so far)', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                      "console.log('transaction-alerts duplicate (afterDuplicate) =', count);",
+                      "const delta = count - Number(pm.collectionVariables.get('m19_notifDuplicate_afterCreate') || 0);",
+                      "pm.test('redelivered event recognised as a duplicate (delta = 1)', () => pm.expect(delta).to.eql(1));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "5.3 transaction-ingestion processed - after duplicate",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{analyticsServiceUrl}}/actuator/metrics/spendwise.kafka.events.idempotency?tag=consumer:transaction-ingestion&tag=outcome:processed",
+                  "host": [
+                    "{{analyticsServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "spendwise.kafka.events.idempotency"
+                  ],
+                  "query": [
+                    {
+                      "key": "tag",
+                      "value": "consumer:transaction-ingestion"
+                    },
+                    {
+                      "key": "tag",
+                      "value": "outcome:processed"
+                    }
+                  ]
+                },
+                "description": "transaction-ingestion: events with outcome=processed so far."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 404 = no event has reached this outcome yet: count 0.",
+                      "const count = pm.response.code === 404 ? 0 : pm.response.json().measurements.find(m => m.statistic === 'COUNT').value;",
+                      "pm.test('metric endpoint answered (200, or 404 = zero so far)', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                      "console.log('transaction-ingestion processed (afterDuplicate) =', count);",
+                      "const delta = count - Number(pm.collectionVariables.get('m19_analyticsProcessed_afterCreate') || 0);",
+                      "pm.test('redelivered event NOT processed again (delta = 0)', () => pm.expect(delta).to.eql(0));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "5.4 transaction-ingestion duplicate - after duplicate",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{analyticsServiceUrl}}/actuator/metrics/spendwise.kafka.events.idempotency?tag=consumer:transaction-ingestion&tag=outcome:duplicate",
+                  "host": [
+                    "{{analyticsServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "spendwise.kafka.events.idempotency"
+                  ],
+                  "query": [
+                    {
+                      "key": "tag",
+                      "value": "consumer:transaction-ingestion"
+                    },
+                    {
+                      "key": "tag",
+                      "value": "outcome:duplicate"
+                    }
+                  ]
+                },
+                "description": "transaction-ingestion: events with outcome=duplicate so far."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 404 = no event has reached this outcome yet: count 0.",
+                      "const count = pm.response.code === 404 ? 0 : pm.response.json().measurements.find(m => m.statistic === 'COUNT').value;",
+                      "pm.test('metric endpoint answered (200, or 404 = zero so far)', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                      "console.log('transaction-ingestion duplicate (afterDuplicate) =', count);",
+                      "const delta = count - Number(pm.collectionVariables.get('m19_analyticsDuplicate_afterCreate') || 0);",
+                      "pm.test('redelivered event recognised as a duplicate (delta = 1)', () => pm.expect(delta).to.eql(1));"
                     ]
                   }
                 }

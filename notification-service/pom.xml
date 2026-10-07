@@ -28,6 +28,26 @@
             <groupId>org.springframework.cloud</groupId>
             <artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>
         </dependency>
+        <!-- Milestone 19 — notification_db: the processed_events idempotency store and
+             the notification_log of alerts recorded, written in one local transaction.
+             Same JPA + Flyway + PostgreSQL stack every other servlet service uses. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+        </dependency>
         <!-- Milestone 18 — this service's first inbound path: a @KafkaListener on
              transaction-events. Version managed by spring-boot-dependencies. -->
         <dependency>

@@ -3,6 +3,9 @@ package com.spendwise.analyticsservice.messaging;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.spendwise.common.messaging.EventHeaders;
+import com.spendwise.common.messaging.EventIdentity;
+import com.spendwise.common.messaging.IdempotencyMetrics;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.header.Header;
 import org.slf4j.Logger;
@@ -11,6 +14,7 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.YearMonth;
 
 /**
@@ -36,6 +40,17 @@ import java.time.YearMonth;
  * <p>This service is WebFlux for HTTP, but this method is ordinary blocking
  * code: the listener container runs it on its own consumer thread, never on
  * a Netty event-loop thread, so it cannot stall request handling.
+ *
+ * <p><b>Idempotent (Milestone 19).</b> Each event goes through
+ * {@link TransactionIngestionService}, which claims its identity in
+ * {@code processed_events} inside an R2DBC transaction and skips it if
+ * already claimed. That pipeline is reactive, and this listener waits for it
+ * with {@code block(timeout)}: blocking is what the listener contract
+ * requires — the offset must not be committed until the claim has — and it is
+ * legal here because a Kafka consumer thread is not one of Reactor's
+ * non-blocking threads. The timeout turns a hung database into a listener
+ * failure (retried by the error handler) instead of a consumer stalled
+ * forever, and stays well under {@code max.poll.interval.ms} (5 minutes).
  */
 @Component
 public class TransactionIngestionListener {
@@ -44,13 +59,21 @@ public class TransactionIngestionListener {
 
     private static final Logger log = LoggerFactory.getLogger(TransactionIngestionListener.class);
 
-    private final ObjectMapper objectMapper;
+    private static final Duration INGEST_TIMEOUT = Duration.ofSeconds(10);
 
-    public TransactionIngestionListener(ObjectMapper objectMapper) {
+    private final ObjectMapper objectMapper;
+    private final TransactionIngestionService transactionIngestionService;
+    private final MeterRegistry meterRegistry;
+
+    public TransactionIngestionListener(ObjectMapper objectMapper,
+                                        TransactionIngestionService transactionIngestionService,
+                                        MeterRegistry meterRegistry) {
         this.objectMapper = objectMapper;
+        this.transactionIngestionService = transactionIngestionService;
+        this.meterRegistry = meterRegistry;
     }
 
-    @KafkaListener(id = "transaction-ingestion", idIsGroup = false,
+    @KafkaListener(id = TransactionIngestionService.CONSUMER, idIsGroup = false,
             topics = "${spendwise.kafka.topics.transaction-events}")
     public void onTransactionEvent(ConsumerRecord<String, String> record) {
         String eventType = header(record, EventHeaders.EVENT_TYPE);
@@ -60,9 +83,19 @@ public class TransactionIngestionListener {
             return;
         }
         TransactionCreatedEvent event = parse(record);
-        log.info("Read-side ingest: user {}, month {}, category {}, {} {} {} (base amount {}) from partition {} offset {}",
-                event.userId(), YearMonth.from(event.transactionDate()), event.categoryId(), event.type(),
-                event.amount(), event.currency(), event.baseCurrencyAmount(), record.partition(), record.offset());
+        EventIdentity eventIdentity = EventIdentity.of(record);
+        Boolean firstDelivery = transactionIngestionService.ingest(eventIdentity, event).block(INGEST_TIMEOUT);
+        boolean processed = Boolean.TRUE.equals(firstDelivery);
+        IdempotencyMetrics.record(meterRegistry, TransactionIngestionService.CONSUMER, processed);
+        if (processed) {
+            log.info("Read-side ingest: user {}, month {}, category {}, {} {} {} (base amount {}), event {}, partition {} offset {}",
+                    event.userId(), YearMonth.from(event.transactionDate()), event.categoryId(), event.type(),
+                    event.amount(), event.currency(), event.baseCurrencyAmount(), eventIdentity,
+                    record.partition(), record.offset());
+        } else {
+            log.info("Duplicate delivery of event {} for transaction {} discarded (partition {} offset {})",
+                    eventIdentity, event.transactionId(), record.partition(), record.offset());
+        }
     }
 
     private TransactionCreatedEvent parse(ConsumerRecord<String, String> record) {

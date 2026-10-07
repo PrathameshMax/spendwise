@@ -2,6 +2,23 @@
 # security, Kafka, resilience) introduce properties that need to be
 # environment-driven.
 
+# Milestone 19 — notification_db, this service's first database (deferred
+# here from Milestone 4, which noted it would arrive with the idempotency
+# store). Same ${VAR:localhost} pattern as every other *_db-backed service.
+spring:
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:5432/notification_db
+    username: ${DB_USERNAME:spendwise}
+    password: ${DB_PASSWORD:spendwise}
+    hikari:
+      # One listener thread per replica (spring.kafka.listener.concurrency: 1)
+      # uses one connection at a time; Hikari's default of 10 per replica would
+      # take 40 of Postgres's default max_connections (100) during the
+      # four-replica chaos lab for no benefit.
+      maximum-pool-size: 3
+  flyway:
+    enabled: true
+
 # Milestone 18 — adds kafkaassignments (spendwise-common's KafkaAssignmentsEndpoint)
 # to the platform-wide exposure list from application.yml: which partitions this
 # instance's TransactionAlertListener owns right now. The full list is repeated
@@ -11,3 +28,8 @@ management:
     web:
       exposure:
         include: health,info,refresh,metrics,prometheus,kafkaassignments
+  endpoint:
+    health:
+      group:
+        readiness:
+          include: readinessState,db

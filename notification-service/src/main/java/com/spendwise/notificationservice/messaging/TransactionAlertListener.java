@@ -3,6 +3,9 @@ package com.spendwise.notificationservice.messaging;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.spendwise.common.messaging.EventHeaders;
+import com.spendwise.common.messaging.EventIdentity;
+import com.spendwise.common.messaging.IdempotencyMetrics;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.header.Header;
 import org.slf4j.Logger;
@@ -30,11 +33,15 @@ import java.nio.charset.StandardCharsets;
  * {@code id} as its {@code group.id} unless told otherwise; without this flag
  * the group would be {@code transaction-alerts}, not the configured one.
  *
- * <p><b>Dispatch is simulated.</b> Delivery channels (email/SMS/push,
- * WebSocket) and the idempotency store that guards them come with Milestones
- * 19 onward; this milestone's job is the consumption itself, so the alert is
- * written to the log, carrying the request's correlation id via
- * {@code CorrelationIdRecordInterceptor}. Records of any other event type on
+ * <p><b>Idempotent (Milestone 19).</b> Kafka delivers at least once, and the
+ * outbox publisher can publish an event twice, so this listener must expect
+ * duplicates. It hands each event to {@link TransactionAlertService}, which
+ * claims the event's identity ({@link EventIdentity}: the outbox event id) in
+ * {@code processed_events} in the same transaction as recording the alert,
+ * and skips the event if the claim already exists. A duplicate is still
+ * acknowledged — it must not be retried — and is counted under
+ * {@code spendwise.kafka.events.idempotency{outcome=duplicate}}. Dispatch is
+ * still simulated (a log line, after commit). Records of any other event type on
  * this topic are skipped, so a future event (Milestone 21's
  * {@code TransactionReversedEvent}) cannot be mis-read as a new transaction.
  *
@@ -50,12 +57,17 @@ public class TransactionAlertListener {
     private static final Logger log = LoggerFactory.getLogger(TransactionAlertListener.class);
 
     private final ObjectMapper objectMapper;
+    private final TransactionAlertService transactionAlertService;
+    private final MeterRegistry meterRegistry;
 
-    public TransactionAlertListener(ObjectMapper objectMapper) {
+    public TransactionAlertListener(ObjectMapper objectMapper, TransactionAlertService transactionAlertService,
+                                    MeterRegistry meterRegistry) {
         this.objectMapper = objectMapper;
+        this.transactionAlertService = transactionAlertService;
+        this.meterRegistry = meterRegistry;
     }
 
-    @KafkaListener(id = "transaction-alerts", idIsGroup = false,
+    @KafkaListener(id = TransactionAlertService.CONSUMER, idIsGroup = false,
             topics = "${spendwise.kafka.topics.transaction-events}")
     public void onTransactionEvent(ConsumerRecord<String, String> record) {
         String eventType = header(record, EventHeaders.EVENT_TYPE);
@@ -65,9 +77,11 @@ public class TransactionAlertListener {
             return;
         }
         TransactionCreatedEvent event = parse(record);
-        log.info("[SIMULATED PUSH] to user {}: {} of {} {} recorded for {} (transaction {}, partition {}, offset {})",
-                event.userId(), event.type(), event.amount(), event.currency(), event.transactionDate(),
-                event.transactionId(), record.partition(), record.offset());
+        EventIdentity eventIdentity = EventIdentity.of(record);
+        boolean firstDelivery = transactionAlertService.recordAlert(eventIdentity, event);
+        IdempotencyMetrics.record(meterRegistry, TransactionAlertService.CONSUMER, firstDelivery);
+        log.debug("Event {} from partition {} offset {}: {}", eventIdentity, record.partition(), record.offset(),
+                firstDelivery ? "processed" : "duplicate, skipped");
     }
 
     private TransactionCreatedEvent parse(ConsumerRecord<String, String> record) {

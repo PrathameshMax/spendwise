@@ -424,8 +424,10 @@ services:
   # (/actuator/kafkaassignments). Not 8085-8088: that range would overlap
   # analytics-service's 8086. With one replica it gets 18085; the container
   # port is still 8085, so in-network callers and Prometheus are unaffected.
-  # Memory limit lowered to 384M (this service holds no data and runs one
-  # consumer) so four replicas fit on a laptop-sized Docker VM.
+  # Memory limit: 384M at Milestone 18, back to 512M at Milestone 19, when the
+  # service gained JPA/Hibernate/Flyway (notification_db) — the same limit as
+  # every other JPA service. Four replicas therefore need ~2 GB; see the README's
+  # Docker memory note before the chaos lab.
   notification-service:
     build:
       context: .
@@ -433,18 +435,24 @@ services:
     ports:
       - "18085-18088:8085"
     environment:
+      # Milestone 19 — notification_db (processed_events + notification_log).
+      # All replicas share it, which is what makes deduplication hold across
+      # a rebalance: the new partition owner sees the old owner's claims.
+      DB_HOST: postgres
       CONFIG_SERVER_URL: http://config-server:8888
       EUREKA_HOST: discovery-server
       MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
       KAFKA_BOOTSTRAP_SERVERS: kafka-1:19092,kafka-2:19092,kafka-3:19092
-      # Overrides the Dockerfile's MaxRAMPercentage=75: at a 384M limit that
-      # would leave ~96M for metaspace, threads and buffers, and the container
-      # (not the VM) would be OOM-killed (exit 137) under load. 60% keeps
-      # ~150M outside the heap.
+      # Overrides the Dockerfile's MaxRAMPercentage=75 (set at Milestone 18,
+      # when this container's limit was 384M). Kept at 60% with the 512M limit
+      # so ~200M stays outside the heap for metaspace (Hibernate's classes
+      # included), threads and buffers.
       JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=60.0 -XX:+ExitOnOutOfMemoryError"
     depends_on:
       config-server:
         condition: service_healthy
+      postgres-db-init:
+        condition: service_completed_successfully
       # Started with, not gated on, the cluster: a consumer that starts before
       # the brokers are reachable simply keeps retrying and joins once they are.
       kafka-1:
@@ -461,7 +469,7 @@ services:
       resources:
         limits:
           cpus: "1.0"
-          memory: 384M
+          memory: 512M
 
   analytics-service:
     build:

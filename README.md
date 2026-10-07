@@ -2052,12 +2052,233 @@ notification-service` shows each rebalance: `Partitions newly assigned …`,
 `Partitions revoked …`, and, after `docker kill`, the survivors picking up
 the orphaned partition about 10 s later.
 
-Memory: four notification replicas at 384 MB each, on top of the full stack
+Memory: four notification replicas (384 MB each at Milestone 18, 512 MB
+from Milestone 19), on top of the full stack
 and Kafka UI, can exceed a 5.6 GB Docker VM. If containers restart with exit
 code 137 during the lab, raise the WSL 2 VM's memory: `%UserProfile%\.wslconfig`
 with `[wsl2]` / `memory=8GB`, then `wsl --shutdown` and restart Docker Desktop.
 
-Next: Milestone 19 — Distributed Idempotency Layers.
+**Milestone 19 complete** — Distributed Idempotency Layers. Scoped to the
+roadmap's sentence: a tracking filter around the Kafka listeners that,
+before acting on a `TransactionCreatedEvent`, checks a `processed_events`
+constraint and discards the message if it was already processed. It is built
+for both consumers (notification-service, analytics-service), on the
+constraint option rather than the Redis `SETNX` option; Q59 below explains
+why. No fixes were raised validating Milestone 18.
+
+**Why duplicates happen here at all.** Two independent sources, both by
+design:
+
+- **Producer side.** Milestone 17's outbox publisher is at-least-once. If the
+  broker acknowledges a record and the publisher dies before committing
+  `processed_at`, the row is published again on restart — as a *new* record
+  at a *new* offset, with the same content.
+- **Consumer side.** A consumer that crashes or is rebalanced away after
+  processing a record, but before its offset commit lands, gets that record
+  again (Milestone 18's `ack-mode: record` narrows this to one record, but
+  can't remove it).
+
+**`EventIdentity`** (new, `spendwise-common/.../messaging`) — what a consumer
+deduplicates on. Not the offset: a producer-side duplicate has a different
+offset. It uses the `outboxEventId` header instead — the outbox row's primary
+key, fixed when the event was created and identical on every copy. A record
+without that header falls back to `topic-partition@offset`, which still
+catches consumer-side redelivery, and says which source it used.
+
+**`IdempotencyMetrics`** (new, spendwise-common) —
+`spendwise.kafka.events.idempotency{consumer, outcome=processed|duplicate}`.
+Read next to Milestone 18's `spendwise.kafka.records.consumed`, which counts
+every delivery: the difference is redelivery the guard absorbed. A delivery
+whose processing failed and rolled back counts as neither; its claim rolled
+back with it.
+
+**notification-service gets its database** (`notification_db`, deferred to
+this milestone since Milestone 4). It is created automatically on existing
+volumes by Milestone 17's `postgres-db-init`, and needs `spring-boot-starter-data-jpa`,
+Flyway and the Postgres driver. All replicas share it, so a partition's new
+owner sees the old owner's claims after a rebalance.
+
+- **`V1__create_processed_events_and_notification_log.sql`** —
+  `processed_events (consumer, event_id, processed_at)`, primary key
+  `(consumer, event_id)`; plus `notification_log`, the record of each alert.
+  `consumer` is the listener name, not the Kafka group, so two listeners in
+  one service can each process the same event once.
+- **`ProcessedEventGuard`** (new, `messaging`) — the check-and-claim. It is a
+  single `INSERT … ON CONFLICT (consumer, event_id) DO NOTHING`, and the row
+  count it returns is the decision: 1 means first delivery, 0 means
+  duplicate. There is no SELECT-then-INSERT, which would let two concurrent
+  deliveries both see "absent". Postgres makes a second inserter wait on the
+  first one's uncommitted row: it gets 0 if the first commits, and 1 if the
+  first rolls back. This was checked against a real Postgres 16 while
+  building: the second session blocked about 2 s, then got `INSERT 0 0` after
+  a commit and `INSERT 0 1` after a rollback. The method is
+  `@Transactional(propagation = MANDATORY)`, so calling it outside the
+  side effect's transaction fails at once. Claiming alone would mark an event
+  processed that never was — a lost event, which is worse than a duplicate.
+  It uses `JdbcTemplate`, which runs on the same connection as the JPA writes
+  under `JpaTransactionManager`.
+- **`NotificationLog`** / **`NotificationLogRepository`** (new, `domain`) —
+  the alert record, written in the same transaction as the claim, so "alert
+  recorded" and "event processed" are one fact.
+- **`TransactionAlertService`** (new, `messaging`) — the idempotent unit of
+  work, in one `@Transactional` method: claim → write `notification_log` →
+  register the simulated push as an `afterCommit` callback. Dispatching after
+  commit means a failed commit never leaves a sent alert with no record of
+  it, and a retry never sends it twice. The one remaining gap (a crash after
+  commit, before the send) loses that send. That is the right trade for an
+  alert; a channel needing more would get its own outbox.
+- **`TransactionAlertListener`** (modified) — now delegates to the service,
+  records the outcome metric, and acknowledges duplicates (a duplicate must
+  not be retried). Its listener id is the shared `CONSUMER` constant.
+
+**analytics-service, reactive version of the same guard.**
+
+- **`V2__create_processed_events_table.sql`** — the same table in
+  `analytics_db`, next to where Milestone 23's projections will live.
+- **`ProcessedEventGuard`** (new) — the same claim through `DatabaseClient`;
+  `rowsUpdated()` gives the count.
+- **`TransactionIngestionService`** (new) — claim, then ingest, wrapped in
+  `TransactionalOperator.transactional(...)`, the reactive `@Transactional`
+  (auto-configured over Boot's `R2dbcTransactionManager`). Ingestion is still
+  Milestone 18's log line. Milestone 23 writes its projections inside this
+  same pipeline, so a replayed duplicate can never double-count in the read
+  model.
+- **`TransactionIngestionListener`** (modified) — waits for that pipeline with
+  `block(10s)`. Blocking is what the listener contract needs: the offset
+  must not commit before the claim does. It is allowed here because a Kafka
+  consumer thread isn't one of Reactor's non-blocking threads. The timeout
+  turns a hung database into a retried failure instead of a stuck consumer.
+
+**Also changed:** `infra/postgres-init/01-create-databases.sql` (+
+`notification_db`); `config-repo/notification-service.yml` (datasource,
+Flyway, readiness includes `db`); `docker-compose.yml` (notification-service
+gets `DB_HOST` and waits for `postgres-db-init`).
+
+**Also from review:** notification-service's memory limit goes back to
+512 MB, since it now loads Hibernate (Milestone 18 had lowered it to 384 MB),
+and its Hikari pool is capped at 3 connections. With one listener thread per
+replica, the default of 10 would take 40 of Postgres's 100 connections during
+the four-replica lab. analytics-service logs its ingest/duplicate line after
+`block()` returns, on the consumer thread and after commit, so the line
+carries the correlation id: the reactive pipeline's operators run on the
+R2DBC driver's I/O thread, where the MDC isn't visible.
+
+**Not built:** pruning old `processed_events` rows. How old a row can safely
+get is set by the longest gap after which a duplicate can still arrive.
+- **Consumer-side redelivery** is bounded by topic retention (Kafka's
+  default is 7 days).
+- **A producer-side resend** has no such bound: it is a new record, published
+  whenever the outbox republishes, for example after transaction-service has
+  been down a long time.
+
+So pruning needs a window longer than the longest outbox stall you would
+tolerate. It is a scheduled cleanup for when volume makes it matter.
+
+**Q59: How do you prevent duplicate processing work?** Accept that
+duplicates will be delivered — at-least-once is what you get from any
+system that retries, and exactly-once *delivery* across a network isn't on
+offer. Then make processing idempotent: give every event a stable identity
+(here the outbox id, not the offset), and record "this consumer processed
+this event" atomically with the work itself, so a second delivery finds the
+record and stops.
+
+The two standard stores trade off as follows:
+
+- **A unique constraint in the consumer's own database** (built here). The
+  claim and the side effect commit in one local transaction, so a crash can
+  never leave one without the other; concurrency is handled by the
+  database's own locking. It costs a write per event and a table that needs
+  pruning.
+- **Redis `SETNX` with a TTL.** Faster, and the TTL prunes itself. But Redis
+  and the side effect's database are two systems with no shared
+  transaction, so set-then-crash loses the event and crash-then-set
+  duplicates it — the same dual-write problem Milestone 16 removed on the
+  producer side. It is fine when the side effect is itself idempotent, or
+  when an occasional duplicate is acceptable.
+
+Kafka's own transactions (exactly-once semantics) only cover
+read-process-write loops that stay inside Kafka. They don't make a database
+write or an email exactly-once.
+
+**Q60: How do you handle idempotency in APIs and consumers, especially
+during network retries?**
+
+- **Consumers:** as above — stable event id plus an atomic processed-record.
+  Acknowledge duplicates rather than failing them, or they are retried
+  forever.
+- **APIs:** a client that times out cannot know whether its `POST` was
+  applied, so it retries, and a naive server creates the resource twice. The
+  standard fix is an `Idempotency-Key` header (a client-generated UUID per
+  logical operation). The server stores the key with the response, in the
+  same transaction as the effect. A retry with the same key gets the stored
+  response back instead of a second effect. In the IETF
+  `Idempotency-Key` draft's terms, the same key with a different request body
+  is rejected (`422`), and a key whose first request is still in progress
+  gets `409`.
+- **Natively idempotent methods:** `GET`/`PUT`/`DELETE` are idempotent by HTTP
+  semantics, so only non-idempotent `POST`/`PATCH` need this.
+- **Network retries in general:** retry only operations that are idempotent
+  or carry a key, with backoff and jitter. That is why this platform's
+  Resilience4j retries (Milestone 11) are applied to the read-only
+  user-existence `GET`, not to any write.
+
+This platform doesn't yet put an `Idempotency-Key` on
+`POST /api/v1/transactions`; the roadmap scopes Milestone 19 to the consumer
+side.
+
+### Validating Milestone 19
+
+As with Milestones 17–18, the authoring sandbox has no Maven Central or
+Docker daemon, so step 0 is the first real build. What was checked there:
+all YAML/XML/JSON parses, `docker compose config` passes, the database
+script and both services' migrations ran on a real Postgres 16, and the
+claim statement's duplicate and concurrent-commit/rollback behaviour was
+exercised as described above.
+
+**Step 0 — build and start (Git Bash).**
+```bash
+cd /d/spendwise
+./mvnw clean test-compile
+docker compose up -d --build
+docker compose ps -a
+docker compose logs notification-service | grep -i "flyway\|Successfully applied"
+docker compose logs analytics-service | grep -i "flyway\|Successfully applied"
+```
+- `postgres-db-init` shows `Exited (0)`; it created `notification_db` on
+  your existing volume.
+- notification-service's Flyway applied `V1__create_processed_events_and_notification_log`.
+- analytics-service's Flyway applied `V2__create_processed_events_table`.
+- Both services are healthy.
+
+**Steps 1–5 — Postman, folder `Milestone 19 - Test Plan`** (re-import the
+collection). Run it with notification-service at one replica, and don't
+restart either consumer mid-plan: the counters are in-memory and reset on
+restart. Folders 0–3 can run in the Collection Runner. Folder 4 is a manual
+stop; then run folder 5. The first request of folders 3 and 5 waits 6 s
+itself, for the outbox poll and consumption.
+
+| Folder | What it proves | Expected |
+| --- | --- | --- |
+| 0. Setup | token, profile, category | all `201` |
+| 1. Baseline | starting counts | `200`, or `404` for an outcome not seen yet |
+| 2. Create one transaction | — | `201`; the Console prints the SQL for folder 4 |
+| 3. Processed exactly once | first delivery acted on | `processed` +1, `duplicate` +0, for both consumers |
+| 4. Force a republish | a real producer-side duplicate | run the printed `UPDATE outbox_events SET processed_at = NULL …` (DB client or `docker exec … psql`); Kafka UI shows a second record at a new offset with the same `outboxEventId` |
+| 5. Duplicate discarded | the guard | `duplicate` +1, `processed` +0, for both consumers |
+
+After folder 5:
+- **notification_db:**
+  `SELECT count(*) FROM notification_log WHERE transaction_id = '<transactionId>'`
+  returns **1**. `SELECT * FROM processed_events ORDER BY processed_at DESC`
+  shows one claim for the event.
+- **Logs:** `docker compose logs notification-service | grep <transactionId>`
+  shows exactly one `[SIMULATED PUSH]`, followed by
+  `Duplicate delivery of event … discarded`.
+  `docker compose logs analytics-service | grep <transactionId>` shows the
+  matching pair: one `Read-side ingest` line, then one `Duplicate delivery`
+  line.
+
+Next: Milestone 20 — Fault-Isolating Stream Boundaries (Dead Letter Topics).
 
 ## API Versioning & Deprecation Policy
 
