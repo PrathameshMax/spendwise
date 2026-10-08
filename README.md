@@ -2443,7 +2443,333 @@ Right after it comes the valid record's `[SIMULATED PUSH]`, under
 of those lines appear depends on its log levels. The attempt count is
 asserted by the `consumed{outcome=failure}` metric (+4), not by log lines.
 
-Next: Milestone 21 — Distributed Business Flows (Choreographed SAGA Pattern).
+**Milestone 21 complete** — Distributed Business Flows (Choreographed SAGA
+Pattern). Scoped to the roadmap's sentence and the Functional Roadmap's
+Workflow 2: when budget-service detects a hard-limit breach, it emits a
+compensating `TransactionRejectedEvent`; transaction-service consumes it,
+flips the entry to `REVERSED`, writes a reversing ledger entry and republishes
+`TransactionReversedEvent`; notification-service tells the user, and
+analytics-service retracts the entry from its read side. No coordinator, no
+distributed transaction: four local transactions chained by events. No fixes
+were raised validating Milestone 20.
+
+```
+POST /transactions (5000) ──201 POSTED──▶ client
+  │ tx 1 (transaction_db): transactions + outbox_events
+  ▼  outbox relay ─▶ transaction-events : TransactionCreatedEvent
+budget-service (group budget-service)
+  │ tx 2 (budget_db): claim; 6000 + 5000 > 10000 on a HARD budget → spend unchanged
+  ▼  publish, acks=all, before commit ─▶ budget-events : TransactionRejectedEvent
+transaction-service (group transaction-service)
+  │ tx 3 (transaction_db): claim; original → REVERSED; insert REVERSAL (-5000); outbox_events
+  ▼  outbox relay ─▶ transaction-events : TransactionReversedEvent (key = original id)
+notification-service: rejection alert (tx 4a)   analytics-service: read-side retraction (tx 4b)
+```
+
+**spendwise-common**
+
+- **`JdbcProcessedEventGuard`** (moved from notification-service's
+  `ProcessedEventGuard`, `messaging` package). transaction-service and
+  budget-service are now JPA consumers too, and each needs the same
+  check-and-claim. It is not a component and not auto-configured: a service
+  opts in by declaring the bean, because only services with a
+  `processed_events` table can use it. `spring-jdbc` added to the common pom
+  as `optional`.
+
+**config-repo**
+
+- **`application.yml`** — producer settings (`acks: all`, idempotence,
+  bounded `max.block.ms`/`request.timeout.ms`/`delivery.timeout.ms`,
+  `template.observation-enabled`, admin timeouts) moved here unchanged from
+  `transaction-service.yml`. budget-service is now the second producer, and
+  every service's DLT recoverer (Milestone 20) publishes through the same
+  `KafkaTemplate`; before this move, notification- and analytics-service's
+  recoverers ran with client defaults. New topic name
+  `spendwise.kafka.topics.budget-events`.
+- **`budget-service.yml`** — `spendwise.budget-events.*`: topic, 3 partitions,
+  RF 3, `min.insync.replicas` 2, 5 s send timeout, 30-day DLT retention.
+
+**budget-service** (spring-kafka added to its pom)
+
+- **`V2__add_enforcement_and_processed_events.sql`** — `budgets.enforcement`
+  (`NOT NULL DEFAULT 'SOFT'`, checked `SOFT|HARD`) and a `processed_events`
+  table. The default means no existing budget starts rejecting anything.
+- **`BudgetEnforcement`** — `SOFT` (alert threshold, may be exceeded) vs
+  `HARD` (do-not-exceed). Workflow 2 Step 2's distinction.
+- **`Budget`** — new `enforcement` field; `wouldBreachHardCap(expense)` (HARD
+  and `currentSpend + expense > cap`, so landing exactly on the cap is
+  allowed); `applySpend(expense)`.
+- **`CreateBudgetRequest` / `BudgetResponse`** — optional `enforcement`
+  (`null` → SOFT) / echoed back. `BudgetService.create` passes it through;
+  `BudgetMapper` maps it by name.
+- **`BudgetRepository.findByUserIdAndCategoryAndPeriodMonth`** — the one
+  budget a transaction counts against.
+- **`messaging.TransactionCreatedEvent`** — budget-service's own tolerant-reader
+  copy, including the new `categoryName`; `budgetAmount()` =
+  `baseCurrencyAmount` if converted, else `amount`.
+- **`messaging.TransactionSpendListener`** — `@KafkaListener` on
+  `transaction-events`, group `budget-service`. Handles
+  `TransactionCreatedEvent` only (it skips `TransactionReversedEvent`: the
+  reversed expense was never added). Counts
+  `spendwise.kafka.events.idempotency{consumer=budget-spend}` and
+  `spendwise.saga.budget.decisions{outcome}`.
+- **`messaging.BudgetSpendService`** — one `@Transactional` per event: claim;
+  skip income, events without a category name (published before this
+  milestone) and transactions with no budget; HARD breach → publish the
+  rejection and leave spend untouched; otherwise add to spend.
+- **`messaging.BudgetDecision`** — the outcomes: `applied`, `rejected`,
+  `no_budget`, `not_expense`, `unattributable`, `duplicate`.
+- **`messaging.TransactionRejectedEvent`** — the compensating event: the
+  fact and its evidence (budget, cap, spend, attempted amount, reason).
+- **`messaging.BudgetEventPublisher`** — publishes it to `budget-events`, key =
+  transaction id, and waits for the `acks=all` acknowledgment *inside*
+  `BudgetSpendService`'s transaction. No outbox is needed here: the trigger is
+  a Kafka record, so a failed publish rolls the transaction back and the error
+  handler redelivers the event, which re-runs the decision. The event id in
+  the `outboxEventId` header is deterministic
+  (`UUID.nameUUIDFromBytes("TransactionRejectedEvent:" + transactionId)`), so
+  the one remaining double publish (acknowledged, then the commit failed) is
+  recognised and discarded by transaction-service's guard. Creates
+  `budget-events` and `budget-events.DLT` at startup (best effort) and before
+  the first publish (guaranteed).
+- **`messaging.BudgetEventsProperties`** / **`config.MessagingConfig`** —
+  binds `spendwise.budget-events.*`; declares the guard bean.
+- **Matching** is on the exact category name, case-sensitively: a budget for
+  `groceries` does not apply to a category `Groceries` (`no_budget`).
+- **A retried decision is re-made.** If the rejection was acknowledged but the
+  commit then failed, the redelivered event is decided again against current
+  spend. Spend only grows here, so the result is the same; a budget-side
+  outbox would be needed only if spend or caps could be lowered between the
+  attempts.
+- **Concurrency limit.** `currentSpend` is a read-modify-write. With several
+  budget-service instances, two expenses on different partitions could be
+  decided from the same starting spend and both slip under a HARD cap.
+  docker-compose runs one instance (one consumer thread, so it's serial);
+  Milestone 24's distributed lock closes it for more.
+
+**transaction-service**
+
+- **`V6__add_status_and_reversal_to_transactions.sql`** — `status`
+  (`NOT NULL DEFAULT 'POSTED'`, checked `POSTED|REVERSED|REVERSAL`),
+  `reverses_transaction_id` (self-FK), `reversal_reason`; a check that a row
+  is `REVERSAL` exactly when it links to another; a partial unique index
+  allowing at most one reversal per entry; a `processed_events` table.
+- **`TransactionStatus`** — the entry lifecycle. The ledger stays
+  append-only: compensation *adds* an entry.
+- **`Transaction`** — `status` (POSTED on creation), `markReversed(reason)`
+  (only from POSTED), `reversalOf(original, reason)` (same user, category,
+  type, date, currency; negated amounts; status REVERSAL; linked).
+- **`TransactionResponse`** — adds `status`, `reversesTransactionId`,
+  `reversalReason` (mapped by name).
+- **`event.TransactionCreatedEvent`** — adds `categoryName` (additive; every
+  existing consumer ignores it).
+- **`event.TransactionReversedEvent`** — the saga's final fact, keyed by the
+  *original* transaction id, so it follows the `TransactionCreatedEvent` on
+  the same partition.
+- **`service.OutboxEventRecorder`** — the outbox write, extracted from
+  `TransactionService` because the reversal is the second operation that
+  records events. `Propagation.MANDATORY`; the correlation id comes from the
+  MDC, which on a consumer thread holds the incoming record's id, so the one id
+  follows the whole saga.
+- **`messaging.TransactionRejectionListener`** — transaction-service's first
+  `@KafkaListener`, on `budget-events`, group `transaction-service`. Counts
+  `spendwise.saga.reversals{outcome}`.
+- **`messaging.TransactionReversalService`** — the compensating transaction:
+  claim, mark REVERSED, insert the REVERSAL entry, record
+  `TransactionReversedEvent`, all one commit. Three layers stop a double
+  reversal: the message guard, the "only POSTED" business check, and the
+  unique index.
+- **`messaging.TransactionRejectedEvent`** / **`ReversalOutcome`** — its copy
+  of the event (`transactionId`, `userId`, `reason` only); outcomes
+  `reversed`, `already_reversed`, `unknown_transaction`, `duplicate`.
+- **`config.IdempotencyConfig`** — the guard bean.
+
+**notification-service**
+
+- **`TransactionAlertListener`** — dispatches on the `eventType` header to
+  `TransactionCreatedEvent` or `TransactionReversedEvent`. One listener, not
+  two: two listeners in one group on one topic would split the partitions,
+  and each would miss half of both event types.
+- **`TransactionAlertService.recordReversalAlert`** — "EXPENSE of 5000.00 INR
+  on … (category) was rejected and reversed: HARD budget …". Same claim, same
+  transaction, same after-commit `[SIMULATED PUSH]`.
+- **`TransactionReversedEvent`** (copy) and **`config.IdempotencyConfig`**
+  (declares the moved guard).
+
+**analytics-service**
+
+- **`TransactionIngestionListener`** — same dispatch; logs
+  `Read-side retraction: transaction … reversed by …` after the claim
+  commits.
+- **`TransactionIngestionService.retract`** — same R2DBC claim-in-a-transaction
+  as `ingest`. Milestone 23 subtracts the entry from its projections here.
+- **`TransactionReversedEvent`** (copy) — carries the same dimensions as the
+  created event, so retracting needs no call back to transaction-service.
+
+**`docker-compose.yml`** — budget-service gets `KAFKA_BOOTSTRAP_SERVERS` and
+`depends_on` the brokers with `service_started` (not `service_healthy`): its
+REST and gRPC APIs stay up while Kafka is down.
+
+**Postman** — new folder `Milestone 21 - Test Plan`. The `Milestone 20 - Test
+Plan` check 3.7 now expects **3** poison copies on the DLT, not 2:
+budget-service is a third consumer group on `transaction-events`.
+
+**Q62: What is the SAGA pattern, and how does it differ from two-phase
+commit?** A saga is a business transaction split into a sequence of local
+transactions, one per service. Each commits on its own and triggers the next.
+If a later step fails, it isn't rolled back; it is *compensated* by further
+local transactions that semantically undo the earlier ones.
+
+Two-phase commit (2PC) makes several databases commit atomically: a
+coordinator asks every participant to *prepare* (lock and promise), then tells
+all of them to commit. Compared with that:
+- **Locks and availability.** 2PC holds locks across services until the
+  slowest participant answers, and a coordinator crash between the phases
+  leaves participants blocked. A saga holds a lock only for the duration of
+  one local transaction.
+- **Isolation.** 2PC gives atomic visibility; a saga doesn't. Here the
+  client gets `201 POSTED` and can read the entry before it becomes
+  `REVERSED`. The design has to allow for that: an explicit status, and a
+  user notification that explains the change.
+- **Undo is business logic.** Compensation is a new fact (a reversing entry),
+  not an erased one. The ledger keeps the history, and its sum is right.
+- **Infrastructure.** 2PC needs XA-capable resources. Kafka and Postgres
+  here only need local transactions and an at-least-once channel.
+- **Choreography vs orchestration.** This saga is *choreographed*: each
+  service reacts to events and nobody owns the flow. Its advantage is low
+  coupling (transaction-service doesn't know budgets exist). Its cost is that
+  the flow lives in no single place. An *orchestrator* (a saga state machine
+  issuing commands) is easier to follow and change once a flow has more
+  steps or branches.
+
+**Q63: How do you handle distributed transactions and ensure eventual
+consistency?** Avoid them by keeping every write local, and make each hop
+between services reliable and repeatable:
+- **No dual writes.** transaction-service's state change and its event commit
+  together through the outbox (Milestones 16–17). budget-service publishes
+  inside its own transaction and lets a failure roll back and redeliver.
+- **At-least-once delivery**, with `acks=all`, RF 3, `min.insync.replicas` 2.
+- **Idempotent consumers.** A `processed_events` claim in the same
+  transaction as the side effect (Milestone 19), plus deterministic event ids
+  where a step may publish twice.
+- **Idempotent compensations.** Reversing an already-reversed entry is a
+  no-op (the "only POSTED" check and the unique index). A compensation
+  replayed must not compensate twice.
+- **Ordering where it matters.** Key by the aggregate, so a reversal never
+  overtakes its creation on the partition.
+- **Make in-between states explicit and observable.** `status`, the
+  `spendwise.saga.*` counters, one correlation id across all four
+  transactions, and a DLT for the step that can't proceed (Milestone 20).
+
+"Eventually" then has a bound you can measure: a few seconds here, the sum of
+the relay poll and the consumer lags.
+
+**Q64: How do you design for backward compatibility during a rolling
+deployment?** During a rollout, old and new versions run together: old
+producers next to new consumers, old consumers next to new producers, and the
+new schema under old code. Every change must work in every one of those
+pairings. This milestone's changes are all of that shape:
+- **Database: expand, then contract.** Columns are added nullable or with a
+  default (`status DEFAULT 'POSTED'`, `enforcement DEFAULT 'SOFT'`). An old
+  instance that inserts without them still writes valid rows, and Flyway can
+  run before any new code does. Drops and renames wait for a later release,
+  once nothing old remains.
+- **Events: add, don't change.** `categoryName` is a new field; nothing was
+  renamed or retyped. Consumers are tolerant readers (`ignoreUnknown`, enums
+  read as `String`), so old consumers ignore it. The new consumer handles old
+  events that lack it (`unattributable`) rather than failing on them.
+- **New event types: consumers first, then producers.** Dispatch is by the
+  `eventType` header and unknown types are skipped, so an old
+  notification-service doesn't break on `TransactionReversedEvent`. But
+  "skipped" means its offset is committed past the event, so it will never
+  send that alert. The rollout order is therefore consumers before producers:
+  notification-, analytics- and transaction-service's listener go out before
+  budget-service starts emitting rejections.
+- **APIs: optional additions.** `enforcement` is optional on the request;
+  new response fields are additive.
+- Milestone 22 replaces this convention with a schema registry that *enforces*
+  compatibility on every publish.
+
+### Validating Milestone 21
+
+As with Milestones 17–20, the authoring sandbox couldn't compile or run this,
+so step 0 is the first real build. What was checked there:
+- all YAML/XML/JSON parses, and `docker compose config` passes;
+- the V6 (transaction_db) and V2 (budget_db) migrations ran on PostgreSQL 16
+  after V1–V5 / V1. Checked: an insert without `status` defaults to
+  `POSTED`; entry + reversal sum to 0; a second reversal, a REVERSAL without a
+  link and an unknown status are each rejected; an unknown enforcement value
+  is rejected;
+- the Postman Kafka UI body was checked to be valid JSON with a valid JSON
+  `value`.
+
+**Step 0 — build and start (Git Bash).** budget-service and
+transaction-service must restart with the new migrations; Flyway applies them
+on startup.
+```bash
+cd /d/spendwise
+./mvnw clean test-compile
+docker compose up -d --build
+docker compose --profile tools up -d kafka-ui
+docker compose logs budget-service | grep "budget-events.DLT ready"
+```
+The last command prints the line in which `budget-events` and
+`budget-events.DLT` are reported ready. Until it appears,
+transaction-service's new listener logs `UNKNOWN_TOPIC_OR_PARTITION` warnings
+for `budget-events`; these stop once the topic exists.
+
+**Wait for budget-service to catch up.** `budget-service` is a new consumer
+group with `auto-offset-reset: earliest`, so its first start reads all of
+`transaction-events` from the beginning. Older events have no `categoryName`
+and are counted as `unattributable`; any Milestone 20 poison pills still on
+the topic (7-day retention) are retried and dead-lettered once more, now by
+budget-service. Open Kafka UI → Consumers → `budget-service` and wait until
+its lag is 0 before running the Milestone 20 or 21 folders. Keep
+notification-service at one replica (`docker compose up -d
+--scale notification-service=1`): the counters Postman reads are per
+instance.
+
+**Steps 0–5 — Postman, folder `Milestone 21 - Test Plan`** (re-import the
+collection). The whole folder can run in the Collection Runner: requests that
+depend on the saga wait for it (1.2 waits 8 s, 4.1 waits 12 s, 5.3 waits
+6 s). Folders 4.7 and 5 use Kafka UI.
+
+| Folder | What it proves | Expected |
+| --- | --- | --- |
+| 0. Setup | user, fresh category, HARD budget | `201` ×4; budget `enforcement: HARD`, `currentSpend: 0` |
+| 1. Within the cap | an expense that fits is applied | 6000 → `201`, `status: POSTED`; budget `currentSpend: 6000` |
+| 2. Baselines | starting counts | `200`/`404` |
+| 3. Breach | the write commits first | 5000 → `201`, `status: POSTED` |
+| 4. Compensated | rejection, reversal, notification, retraction | `decisions{rejected}` +1; `reversals{reversed}` +1; 5000 entry `REVERSED` with a `HARD budget …` reason; one `REVERSAL` entry of `-5000` linked to it; 3 entries, sum 6000; budget still 6000; notification `processed` +2 and analytics `processed` +2 (the 5000 created event + the reversed event); `budget-events` 3 partitions RF 3, and `budget-events.DLT` |
+| 5. Idempotent compensation | a second rejection event for the same entry | Kafka UI `200`; `reversals{already_reversed}` +1; still one `REVERSAL` entry |
+
+**In the logs**, one correlation id follows the saga across all four
+services. Request 3.1 sends `X-Correlation-ID: m21-saga-<timestamp>` and
+prints it in the Postman Console:
+```bash
+docker compose logs transaction-service budget-service notification-service analytics-service | grep m21-saga-
+```
+Expect, in order:
+- budget-service: `Transaction … rejected: HARD budget 'M21 Gadgets …' for …: cap 10000.00, spent 6000.00, this expense of 5000 would make it 11000.00`, then
+  `TransactionRejectedEvent … acknowledged at budget-events-…`;
+- transaction-service: `Transaction … reversed by entry … (-5000.00 INR)`;
+- notification-service: `[SIMULATED PUSH] … EXPENSE of 5000.00 INR on … was rejected and reversed: HARD budget …`;
+- analytics-service: `Read-side retraction: transaction … reversed by …`.
+
+Zipkin shows the same chain as linked spans.
+
+**In Kafka UI**, Topics → `budget-events` → Messages: the rejection
+(`eventType: TransactionRejectedEvent`) and the Postman replay from step 5.2.
+Topics → `transaction-events`: the `TransactionReversedEvent`, on the same
+partition as its `TransactionCreatedEvent`.
+
+**In SQL**, the ledger keeps both entries (container name as in earlier
+milestones):
+```bash
+docker exec -it spendwise-postgres psql -U spendwise -d transaction_db -c "SELECT id, amount, status, reverses_transaction_id, reversal_reason FROM transactions WHERE status <> 'POSTED' ORDER BY created_at DESC LIMIT 4;"
+```
+
+Next: Milestone 22 — Schema Governance (Avro/Protobuf + Schema Registry).
 
 ## API Versioning & Deprecation Policy
 

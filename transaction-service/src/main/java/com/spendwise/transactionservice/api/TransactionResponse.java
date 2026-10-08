@@ -1,5 +1,6 @@
 package com.spendwise.transactionservice.api;
 
+import com.spendwise.transactionservice.domain.TransactionStatus;
 import com.spendwise.transactionservice.domain.TransactionType;
 
 import java.math.BigDecimal;
@@ -18,5 +19,8 @@ public record TransactionResponse(
         LocalDate transactionDate,
         Instant createdAt,
         String currency,
-        BigDecimal baseCurrencyAmount) {
+        BigDecimal baseCurrencyAmount,
+        TransactionStatus status,
+        UUID reversesTransactionId,
+        String reversalReason) {
 }

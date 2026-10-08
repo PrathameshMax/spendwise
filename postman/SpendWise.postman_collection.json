@@ -235,6 +235,56 @@
       "key": "m20CreatedAt",
       "value": "",
       "description": "Milestone 20 test plan: generated per run."
+    },
+    {
+      "key": "m21CategoryName",
+      "value": "",
+      "description": "Milestone 21: category name the HARD budget is keyed on."
+    },
+    {
+      "key": "m21BudgetId",
+      "value": "",
+      "description": "Milestone 21: the HARD budget."
+    },
+    {
+      "key": "m21TxAllowed",
+      "value": "",
+      "description": "Milestone 21: the 6000 expense that fits under the cap."
+    },
+    {
+      "key": "m21TxRejected",
+      "value": "",
+      "description": "Milestone 21: the 5000 expense that breaches the cap."
+    },
+    {
+      "key": "m21ReplayId",
+      "value": "",
+      "description": "Milestone 21: outboxEventId of the hand-made duplicate rejection."
+    },
+    {
+      "key": "m21Rejected",
+      "value": "",
+      "description": "Milestone 21 baseline: budget decisions outcome=rejected."
+    },
+    {
+      "key": "m21Reversed",
+      "value": "",
+      "description": "Milestone 21 baseline: reversals outcome=reversed."
+    },
+    {
+      "key": "m21AlreadyReversed",
+      "value": "",
+      "description": "Milestone 21 baseline: reversals outcome=already_reversed."
+    },
+    {
+      "key": "m21NotifProcessed",
+      "value": "",
+      "description": "Milestone 21 baseline: transaction-alerts processed."
+    },
+    {
+      "key": "m21AnalyticsProcessed",
+      "value": "",
+      "description": "Milestone 21 baseline: transaction-ingestion processed."
     }
   ],
   "item": [
@@ -3593,7 +3643,7 @@
         },
         {
           "name": "1c. Both groups consumed everything",
-          "description": "Same records, two groups, two purposes: each count rose by at least the number created in 1b (more is fine \u2014 e.g. retries, or other traffic). Also visible in Kafka UI > Consumers: groups notification-service and analytics-service, each with lag 0 on all 3 partitions.",
+          "description": "Same records, two groups, two purposes: each count rose by at least the number created in 1b (more is fine \u2014 e.g. retries, or other traffic). Also visible in Kafka UI > Consumers: groups notification-service and analytics-service (and, since Milestone 21, budget-service), each with lag 0 on all 3 partitions.",
           "item": [
             {
               "name": "1c.1 notification-service consumed all",
@@ -5433,7 +5483,7 @@
         },
         {
           "name": "3. Retried, dead-lettered, partition kept moving",
-          "description": "3.1 waits 12 s first. Then: 4 failed attempts and 1 dead-letter per consumer group, the valid record processed by each, and two copies of the poison on transaction-events.DLT partition 0 (one per group). In Kafka UI > Topics > transaction-events.DLT > Messages, open either copy: headers kafka_dlt-original-topic/-partition/-offset, kafka_dlt-original-consumer-group, kafka_dlt-exception-message (the parse error), plus the original X-Correlation-ID m20-poison-....",
+          "description": "3.1 waits 12 s first. Then: 4 failed attempts and 1 dead-letter per consumer group, the valid record processed by each, and three copies of the poison on transaction-events.DLT partition 0 (one per group: notification-, analytics- and, since Milestone 21, budget-service). In Kafka UI > Topics > transaction-events.DLT > Messages, open either copy: headers kafka_dlt-original-topic/-partition/-offset, kafka_dlt-original-consumer-group, kafka_dlt-exception-message (the parse error), plus the original X-Correlation-ID m20-poison-....",
           "item": [
             {
               "name": "3.1 notification-service: poison attempted 4 times (1 + 3 retries)",
@@ -5758,7 +5808,7 @@
               ]
             },
             {
-              "name": "3.7 Two copies of the poison on transaction-events.DLT partition 0",
+              "name": "3.7 Three copies of the poison on transaction-events.DLT partition 0",
               "request": {
                 "method": "GET",
                 "header": [],
@@ -5775,7 +5825,7 @@
                     "transaction-events.DLT"
                   ]
                 },
-                "description": "One per consumer group, on the same partition number the poison came from."
+                "description": "One per consumer group, on the same partition number the poison came from. Three groups since Milestone 21 (notification-service, analytics-service, budget-service); two before it."
               },
               "event": [
                 {
@@ -5787,7 +5837,1144 @@
                       "const p0 = pm.response.json().partitions.find(p => p.partition === 0);",
                       "const delta = p0.offsetMax - Number(pm.collectionVariables.get('m20DltBase'));",
                       "console.log('DLT partition 0 new records:', delta);",
-                      "pm.test('2 new DLT records on partition 0 (notification-service + analytics-service)', () => pm.expect(delta).to.eql(2));"
+                      "pm.test('3 new DLT records on partition 0 (notification-, analytics-, budget-service)', () => pm.expect(delta).to.eql(3));"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Milestone 21 - Test Plan",
+      "description": "Budget-breach compensation (Functional Roadmap, Workflow 2), end to end through the API Gateway. Run the folders in order (the Collection Runner is fine; requests that need the saga to finish wait for it themselves). Before the first run, wait until the budget-service consumer group has lag 0 (Kafka UI > Consumers) and keep notification-service at one replica. Folder 5 needs Kafka UI (docker compose --profile tools up -d kafka-ui). A HARD budget of 10000 is created for a fresh category; a 6000 expense fits and is applied; a 5000 expense would make it 11000, so budget-service publishes TransactionRejectedEvent and transaction-service reverses the entry \u2014 after the client already got 201 for it.",
+      "item": [
+        {
+          "name": "0. Setup",
+          "description": "Token, profile (INR), a fresh category, and a HARD budget for it this month.",
+          "item": [
+            {
+              "name": "0.1 Register (via Gateway)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/api/v1/auth/register",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "auth",
+                    "register"
+                  ]
+                },
+                "description": "Fresh email per run.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"m21-{{$timestamp}}@spendwise.dev\",\n  \"rawPassword\": \"ChangeMe123!\"\n}"
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                      "pm.collectionVariables.set('accessToken', pm.response.json().accessToken);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "0.2 Create user profile (via Gateway)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/api/v1/users",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "users"
+                  ]
+                },
+                "description": "Base currency INR, so the expenses below need no conversion.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"m21-profile-{{$timestamp}}@spendwise.dev\",\n  \"fullName\": \"Milestone 21 Tester\",\n  \"preferredCurrency\": \"INR\"\n}"
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                      "pm.collectionVariables.set('userId', pm.response.json().id);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "0.3 Create category (via Gateway)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/api/v1/categories",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "categories"
+                  ]
+                },
+                "description": "Category names are globally unique, so a timestamp is appended. Budgets match on this name.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"M21 Gadgets {{$timestamp}}\"\n}"
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                      "const c = pm.response.json();",
+                      "pm.collectionVariables.set('categoryId', c.id);",
+                      "pm.collectionVariables.set('m21CategoryName', c.name);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "0.4 Create HARD budget of 10000 for this category, this month",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/api/v1/budgets",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "budgets"
+                  ]
+                },
+                "description": "enforcement HARD = do-not-exceed ceiling. Omit the field and the budget is SOFT (the pre-Milestone-21 behaviour).",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"userId\": \"{{userId}}\",\n  \"category\": \"{{m21CategoryName}}\",\n  \"cappedAmount\": 10000,\n  \"periodMonth\": \"{{periodMonth}}\",\n  \"enforcement\": \"HARD\"\n}"
+                }
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const now = new Date();",
+                      "pm.collectionVariables.set('today', now.toISOString().slice(0, 10));",
+                      "pm.collectionVariables.set('periodMonth', now.toISOString().slice(0, 7));"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                      "const b = pm.response.json();",
+                      "pm.test('enforcement is HARD', () => pm.expect(b.enforcement).to.eql('HARD'));",
+                      "pm.test('currentSpend starts at 0', () => pm.expect(Number(b.currentSpend)).to.eql(0));",
+                      "pm.collectionVariables.set('m21BudgetId', b.id);"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "1. An expense within the cap is applied",
+          "description": "6000 of 10000.",
+          "item": [
+            {
+              "name": "1.1 Create expense of 6000",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/api/v1/transactions",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "transactions"
+                  ]
+                },
+                "description": "Fits under the cap.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"userId\": \"{{userId}}\",\n  \"categoryId\": \"{{categoryId}}\",\n  \"amount\": 6000,\n  \"type\": \"EXPENSE\",\n  \"description\": \"Milestone 21 within cap\",\n  \"transactionDate\": \"{{today}}\",\n  \"currency\": \"INR\"\n}"
+                }
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const now = new Date();",
+                      "pm.collectionVariables.set('today', now.toISOString().slice(0, 10));",
+                      "pm.collectionVariables.set('periodMonth', now.toISOString().slice(0, 7));"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                      "const t = pm.response.json();",
+                      "pm.test('status POSTED', () => pm.expect(t.status).to.eql('POSTED'));",
+                      "pm.collectionVariables.set('m21TxAllowed', t.id);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "1.2 Budget currentSpend is 6000",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/api/v1/budgets/{{userId}}/summary?periodMonth={{periodMonth}}",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "budgets",
+                    "{{userId}}",
+                    "summary"
+                  ],
+                  "query": [
+                    {
+                      "key": "periodMonth",
+                      "value": "{{periodMonth}}"
+                    }
+                  ]
+                },
+                "description": "Waits 8 s for outbox relay -> transaction-events -> budget-service."
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// Let budget-service consume the TransactionCreatedEvent.",
+                      "setTimeout(() => {}, 8000);"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                      "const b = pm.response.json().find(x => x.id === pm.collectionVariables.get('m21BudgetId'));",
+                      "pm.test('budget found', () => pm.expect(b).to.be.an('object'));",
+                      "pm.test('currentSpend = 6000', () => pm.expect(Number(b.currentSpend)).to.eql(6000));"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "2. Baselines",
+          "description": "Counts before the breaching expense.",
+          "item": [
+            {
+              "name": "2.1 Baseline - budget-service spendwise.saga.budget.decisions",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{budgetServiceUrl}}/actuator/metrics/spendwise.saga.budget.decisions?tag=outcome:rejected",
+                  "host": [
+                    "{{budgetServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "spendwise.saga.budget.decisions"
+                  ],
+                  "query": [
+                    {
+                      "key": "tag",
+                      "value": "outcome:rejected"
+                    }
+                  ]
+                },
+                "description": "Starting count."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 404 = nothing counted yet for these tags: 0.",
+                      "const count = pm.response.code === 404 ? 0 : pm.response.json().measurements.find(m => m.statistic === 'COUNT').value;",
+                      "pm.test('metric endpoint answered (200, or 404 = zero so far)', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                      "pm.collectionVariables.set('m21Rejected', count);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "2.2 Baseline - transaction-service spendwise.saga.reversals",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{transactionServiceUrl}}/actuator/metrics/spendwise.saga.reversals?tag=outcome:reversed",
+                  "host": [
+                    "{{transactionServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "spendwise.saga.reversals"
+                  ],
+                  "query": [
+                    {
+                      "key": "tag",
+                      "value": "outcome:reversed"
+                    }
+                  ]
+                },
+                "description": "Starting count."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 404 = nothing counted yet for these tags: 0.",
+                      "const count = pm.response.code === 404 ? 0 : pm.response.json().measurements.find(m => m.statistic === 'COUNT').value;",
+                      "pm.test('metric endpoint answered (200, or 404 = zero so far)', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                      "pm.collectionVariables.set('m21Reversed', count);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "2.3 Baseline - notification-service spendwise.kafka.events.idempotency",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{notificationServiceUrl}}/actuator/metrics/spendwise.kafka.events.idempotency?tag=consumer:transaction-alerts&tag=outcome:processed",
+                  "host": [
+                    "{{notificationServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "spendwise.kafka.events.idempotency"
+                  ],
+                  "query": [
+                    {
+                      "key": "tag",
+                      "value": "consumer:transaction-alerts"
+                    },
+                    {
+                      "key": "tag",
+                      "value": "outcome:processed"
+                    }
+                  ]
+                },
+                "description": "Starting count."
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// Docker assigns notification-service a port from 18085-18088; find the live one.",
+                      "const ports = [18085, 18086, 18087, 18088];",
+                      "function probe(i) {",
+                      "  if (i >= ports.length) { console.warn('No notification-service replica answered on 18085-18088'); return; }",
+                      "  const base = 'http://localhost:' + ports[i];",
+                      "  pm.sendRequest({ url: base + '/actuator/health', method: 'GET' }, (err, res) => {",
+                      "    if (!err && res.code === 200) { pm.collectionVariables.set('notificationServiceUrl', base); }",
+                      "    else { probe(i + 1); }",
+                      "  });",
+                      "}",
+                      "probe(0);"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 404 = nothing counted yet for these tags: 0.",
+                      "const count = pm.response.code === 404 ? 0 : pm.response.json().measurements.find(m => m.statistic === 'COUNT').value;",
+                      "pm.test('metric endpoint answered (200, or 404 = zero so far)', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                      "pm.collectionVariables.set('m21NotifProcessed', count);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "2.4 Baseline - analytics-service spendwise.kafka.events.idempotency",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{analyticsServiceUrl}}/actuator/metrics/spendwise.kafka.events.idempotency?tag=consumer:transaction-ingestion&tag=outcome:processed",
+                  "host": [
+                    "{{analyticsServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "spendwise.kafka.events.idempotency"
+                  ],
+                  "query": [
+                    {
+                      "key": "tag",
+                      "value": "consumer:transaction-ingestion"
+                    },
+                    {
+                      "key": "tag",
+                      "value": "outcome:processed"
+                    }
+                  ]
+                },
+                "description": "Starting count."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 404 = nothing counted yet for these tags: 0.",
+                      "const count = pm.response.code === 404 ? 0 : pm.response.json().measurements.find(m => m.statistic === 'COUNT').value;",
+                      "pm.test('metric endpoint answered (200, or 404 = zero so far)', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                      "pm.collectionVariables.set('m21AnalyticsProcessed', count);"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "3. An expense that breaches the HARD cap",
+          "description": "6000 + 5000 = 11000 > 10000.",
+          "item": [
+            {
+              "name": "3.1 Create expense of 5000 - accepted first (201, POSTED)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  },
+                  {
+                    "key": "X-Correlation-ID",
+                    "value": "m21-saga-{{$timestamp}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/api/v1/transactions",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "transactions"
+                  ]
+                },
+                "description": "transaction-service does not know about budgets: it commits and answers 201. The rule is enforced afterwards, by the saga.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"userId\": \"{{userId}}\",\n  \"categoryId\": \"{{categoryId}}\",\n  \"amount\": 5000,\n  \"type\": \"EXPENSE\",\n  \"description\": \"Milestone 21 breaches cap\",\n  \"transactionDate\": \"{{today}}\",\n  \"currency\": \"INR\"\n}"
+                }
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const now = new Date();",
+                      "pm.collectionVariables.set('today', now.toISOString().slice(0, 10));",
+                      "pm.collectionVariables.set('periodMonth', now.toISOString().slice(0, 7));"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                      "const t = pm.response.json();",
+                      "pm.test('status POSTED (compensation has not happened yet)', () => pm.expect(t.status).to.eql('POSTED'));",
+                      "pm.collectionVariables.set('m21TxRejected', t.id);",
+                      "console.log('Saga correlation id:', pm.response.headers.get('X-Correlation-ID'));"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "4. Compensated: rejected, reversed, notified, retracted",
+          "description": "4.1 waits 12 s first: relay, budget-service decision, budget-events, reversal, outbox relay again, then the two read-side consumers. Search Zipkin or the logs for the correlation id: one id across all five services.",
+          "item": [
+            {
+              "name": "4.1 budget-service: one HARD-cap rejection",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{budgetServiceUrl}}/actuator/metrics/spendwise.saga.budget.decisions?tag=outcome:rejected",
+                  "host": [
+                    "{{budgetServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "spendwise.saga.budget.decisions"
+                  ],
+                  "query": [
+                    {
+                      "key": "tag",
+                      "value": "outcome:rejected"
+                    }
+                  ]
+                },
+                "description": "budget-service: one HARD-cap rejection."
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// Let the saga run: created -> rejected -> reversed -> notified/retracted.",
+                      "setTimeout(() => {}, 12000);"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 404 = nothing counted yet for these tags: 0.",
+                      "const count = pm.response.code === 404 ? 0 : pm.response.json().measurements.find(m => m.statistic === 'COUNT').value;",
+                      "pm.test('metric endpoint answered (200, or 404 = zero so far)', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                      "const delta = count - Number(pm.collectionVariables.get('m21Rejected') || 0);",
+                      "console.log('m21Rejected delta =', delta);",
+                      "pm.test('budget-service: one HARD-cap rejection (delta = 1)', () => pm.expect(delta).to.eql(1));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "4.2 transaction-service: one compensating reversal",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{transactionServiceUrl}}/actuator/metrics/spendwise.saga.reversals?tag=outcome:reversed",
+                  "host": [
+                    "{{transactionServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "spendwise.saga.reversals"
+                  ],
+                  "query": [
+                    {
+                      "key": "tag",
+                      "value": "outcome:reversed"
+                    }
+                  ]
+                },
+                "description": "transaction-service: one compensating reversal."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 404 = nothing counted yet for these tags: 0.",
+                      "const count = pm.response.code === 404 ? 0 : pm.response.json().measurements.find(m => m.statistic === 'COUNT').value;",
+                      "pm.test('metric endpoint answered (200, or 404 = zero so far)', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                      "const delta = count - Number(pm.collectionVariables.get('m21Reversed') || 0);",
+                      "console.log('m21Reversed delta =', delta);",
+                      "pm.test('transaction-service: one compensating reversal (delta = 1)', () => pm.expect(delta).to.eql(1));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "4.3 Ledger: original REVERSED, reversing entry -5000, sum 6000",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/api/v1/transactions?userId={{userId}}&categoryId={{categoryId}}&page=0&size=20",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "transactions"
+                  ],
+                  "query": [
+                    {
+                      "key": "userId",
+                      "value": "{{userId}}"
+                    },
+                    {
+                      "key": "categoryId",
+                      "value": "{{categoryId}}"
+                    },
+                    {
+                      "key": "page",
+                      "value": "0"
+                    },
+                    {
+                      "key": "size",
+                      "value": "20"
+                    }
+                  ]
+                },
+                "description": "Append-only: nothing deleted, one entry added."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                      "const rows = pm.response.json().content;",
+                      "const rejected = rows.find(r => r.id === pm.collectionVariables.get('m21TxRejected'));",
+                      "const allowed = rows.find(r => r.id === pm.collectionVariables.get('m21TxAllowed'));",
+                      "const reversal = rows.find(r => r.reversesTransactionId === pm.collectionVariables.get('m21TxRejected'));",
+                      "pm.test('breaching entry is REVERSED', () => pm.expect(rejected.status).to.eql('REVERSED'));",
+                      "pm.test('reversal reason names the HARD budget', () => pm.expect(rejected.reversalReason).to.include('HARD budget'));",
+                      "pm.test('allowed entry still POSTED', () => pm.expect(allowed.status).to.eql('POSTED'));",
+                      "pm.test('reversing entry exists, status REVERSAL', () => pm.expect(reversal.status).to.eql('REVERSAL'));",
+                      "pm.test('reversing entry amount -5000', () => pm.expect(Number(reversal.amount)).to.eql(-5000));",
+                      "pm.test('3 entries in this category', () => pm.expect(rows.length).to.eql(3));",
+                      "const sum = rows.reduce((s, r) => s + Number(r.amount), 0);",
+                      "pm.test('ledger sum 6000 (5000 and -5000 cancel)', () => pm.expect(sum).to.eql(6000));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "4.4 Budget currentSpend still 6000",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/api/v1/budgets/{{userId}}/summary?periodMonth={{periodMonth}}",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "budgets",
+                    "{{userId}}",
+                    "summary"
+                  ],
+                  "query": [
+                    {
+                      "key": "periodMonth",
+                      "value": "{{periodMonth}}"
+                    }
+                  ]
+                },
+                "description": "The rejected expense was never added."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                      "const b = pm.response.json().find(x => x.id === pm.collectionVariables.get('m21BudgetId'));",
+                      "pm.test('currentSpend = 6000', () => pm.expect(Number(b.currentSpend)).to.eql(6000));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "4.5 notification-service: created alert + rejection alert",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{notificationServiceUrl}}/actuator/metrics/spendwise.kafka.events.idempotency?tag=consumer:transaction-alerts&tag=outcome:processed",
+                  "host": [
+                    "{{notificationServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "spendwise.kafka.events.idempotency"
+                  ],
+                  "query": [
+                    {
+                      "key": "tag",
+                      "value": "consumer:transaction-alerts"
+                    },
+                    {
+                      "key": "tag",
+                      "value": "outcome:processed"
+                    }
+                  ]
+                },
+                "description": "notification-service: created alert + rejection alert."
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// Docker assigns notification-service a port from 18085-18088; find the live one.",
+                      "const ports = [18085, 18086, 18087, 18088];",
+                      "function probe(i) {",
+                      "  if (i >= ports.length) { console.warn('No notification-service replica answered on 18085-18088'); return; }",
+                      "  const base = 'http://localhost:' + ports[i];",
+                      "  pm.sendRequest({ url: base + '/actuator/health', method: 'GET' }, (err, res) => {",
+                      "    if (!err && res.code === 200) { pm.collectionVariables.set('notificationServiceUrl', base); }",
+                      "    else { probe(i + 1); }",
+                      "  });",
+                      "}",
+                      "probe(0);"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 404 = nothing counted yet for these tags: 0.",
+                      "const count = pm.response.code === 404 ? 0 : pm.response.json().measurements.find(m => m.statistic === 'COUNT').value;",
+                      "pm.test('metric endpoint answered (200, or 404 = zero so far)', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                      "const delta = count - Number(pm.collectionVariables.get('m21NotifProcessed') || 0);",
+                      "console.log('m21NotifProcessed delta =', delta);",
+                      "pm.test('notification-service: created alert + rejection alert (delta = 2)', () => pm.expect(delta).to.eql(2));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "4.6 analytics-service: ingest + read-side retraction",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{analyticsServiceUrl}}/actuator/metrics/spendwise.kafka.events.idempotency?tag=consumer:transaction-ingestion&tag=outcome:processed",
+                  "host": [
+                    "{{analyticsServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "spendwise.kafka.events.idempotency"
+                  ],
+                  "query": [
+                    {
+                      "key": "tag",
+                      "value": "consumer:transaction-ingestion"
+                    },
+                    {
+                      "key": "tag",
+                      "value": "outcome:processed"
+                    }
+                  ]
+                },
+                "description": "analytics-service: ingest + read-side retraction."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 404 = nothing counted yet for these tags: 0.",
+                      "const count = pm.response.code === 404 ? 0 : pm.response.json().measurements.find(m => m.statistic === 'COUNT').value;",
+                      "pm.test('metric endpoint answered (200, or 404 = zero so far)', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                      "const delta = count - Number(pm.collectionVariables.get('m21AnalyticsProcessed') || 0);",
+                      "console.log('m21AnalyticsProcessed delta =', delta);",
+                      "pm.test('analytics-service: ingest + read-side retraction (delta = 2)', () => pm.expect(delta).to.eql(2));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "4.7 budget-events exists (3 partitions, RF 3), and its DLT",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{kafkaUiUrl}}/api/clusters/spendwise/topics/budget-events",
+                  "host": [
+                    "{{kafkaUiUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "clusters",
+                    "spendwise",
+                    "topics",
+                    "budget-events"
+                  ]
+                },
+                "description": "Created by budget-service. Needs Kafka UI; skip if it is not running."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('200 OK - topic exists', () => pm.response.to.have.status(200));",
+                      "if (pm.response.code !== 200) { return; }",
+                      "const t = pm.response.json();",
+                      "pm.test('3 partitions', () => pm.expect(t.partitionCount).to.eql(3));",
+                      "pm.test('replication factor 3', () => pm.expect(t.replicationFactor).to.eql(3));",
+                      "pm.sendRequest(pm.variables.replaceIn('{{kafkaUiUrl}}/api/clusters/spendwise/topics/budget-events.DLT'), (err, res) => {",
+                      "  pm.test('budget-events.DLT exists', () => pm.expect(res.code).to.eql(200));",
+                      "});"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "5. Compensation is idempotent",
+          "description": "A different rejection event (new outboxEventId, so the message guard lets it through) for the same transaction must change nothing: the entry is no longer POSTED. Needs Kafka UI.",
+          "item": [
+            {
+              "name": "5.1 Baseline - transaction-service spendwise.saga.reversals",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{transactionServiceUrl}}/actuator/metrics/spendwise.saga.reversals?tag=outcome:already_reversed",
+                  "host": [
+                    "{{transactionServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "spendwise.saga.reversals"
+                  ],
+                  "query": [
+                    {
+                      "key": "tag",
+                      "value": "outcome:already_reversed"
+                    }
+                  ]
+                },
+                "description": "Starting count."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 404 = nothing counted yet for these tags: 0.",
+                      "const count = pm.response.code === 404 ? 0 : pm.response.json().measurements.find(m => m.statistic === 'COUNT').value;",
+                      "pm.test('metric endpoint answered (200, or 404 = zero so far)', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                      "pm.collectionVariables.set('m21AlreadyReversed', count);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "5.2 Produce a second TransactionRejectedEvent for the same transaction",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{kafkaUiUrl}}/api/clusters/spendwise/topics/budget-events/messages",
+                  "host": [
+                    "{{kafkaUiUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "clusters",
+                    "spendwise",
+                    "topics",
+                    "budget-events",
+                    "messages"
+                  ]
+                },
+                "description": "As if budget-service had decided twice.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"partition\": 0,\n  \"key\": \"{{m21TxRejected}}\",\n  \"value\": \"{\\\"transactionId\\\":\\\"{{m21TxRejected}}\\\",\\\"userId\\\":\\\"{{userId}}\\\",\\\"reason\\\":\\\"Postman replay of a rejection that was already compensated\\\"}\",\n  \"keySerde\": \"String\",\n  \"valueSerde\": \"String\",\n  \"headers\": {\n    \"eventType\": \"TransactionRejectedEvent\",\n    \"aggregateType\": \"Transaction\",\n    \"outboxEventId\": \"{{m21ReplayId}}\",\n    \"X-Correlation-ID\": \"m21-replay-{{m21ReplayId}}\"\n  }\n}"
+                }
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.collectionVariables.set('m21ReplayId', pm.variables.replaceIn('{{$guid}}'));"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('200 OK - record produced', () => pm.response.to.have.status(200));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "5.3 transaction-service: replayed rejection is a business no-op",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{transactionServiceUrl}}/actuator/metrics/spendwise.saga.reversals?tag=outcome:already_reversed",
+                  "host": [
+                    "{{transactionServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "spendwise.saga.reversals"
+                  ],
+                  "query": [
+                    {
+                      "key": "tag",
+                      "value": "outcome:already_reversed"
+                    }
+                  ]
+                },
+                "description": "transaction-service: replayed rejection is a business no-op."
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// Let transaction-service consume it.",
+                      "setTimeout(() => {}, 6000);"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 404 = nothing counted yet for these tags: 0.",
+                      "const count = pm.response.code === 404 ? 0 : pm.response.json().measurements.find(m => m.statistic === 'COUNT').value;",
+                      "pm.test('metric endpoint answered (200, or 404 = zero so far)', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                      "const delta = count - Number(pm.collectionVariables.get('m21AlreadyReversed') || 0);",
+                      "console.log('m21AlreadyReversed delta =', delta);",
+                      "pm.test('transaction-service: replayed rejection is a business no-op (delta = 1)', () => pm.expect(delta).to.eql(1));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "5.4 Still exactly one reversing entry",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/api/v1/transactions?userId={{userId}}&categoryId={{categoryId}}&page=0&size=20",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "transactions"
+                  ],
+                  "query": [
+                    {
+                      "key": "userId",
+                      "value": "{{userId}}"
+                    },
+                    {
+                      "key": "categoryId",
+                      "value": "{{categoryId}}"
+                    },
+                    {
+                      "key": "page",
+                      "value": "0"
+                    },
+                    {
+                      "key": "size",
+                      "value": "20"
+                    }
+                  ]
+                },
+                "description": "No second compensation."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                      "const rows = pm.response.json().content;",
+                      "const reversals = rows.filter(r => r.reversesTransactionId === pm.collectionVariables.get('m21TxRejected'));",
+                      "pm.test('one REVERSAL row', () => pm.expect(reversals.length).to.eql(1));",
+                      "pm.test('3 entries in this category', () => pm.expect(rows.length).to.eql(3));"
                     ]
                   }
                 }

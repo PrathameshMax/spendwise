@@ -17,6 +17,13 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.UUID;
 
+/**
+ * Milestone 21 — every entry carries a {@link TransactionStatus}. A rejected
+ * entry is compensated with {@link #markReversed(String)} plus a new entry
+ * from {@link #reversalOf(Transaction, String)}, never a delete: the ledger
+ * stays append-only and its sum stays correct (the entry and its reversal
+ * cancel out), while the history of what happened and why is kept.
+ */
 @Entity
 @Table(name = "transactions")
 public class Transaction {
@@ -61,6 +68,16 @@ public class Transaction {
     @Column(name = "base_currency_amount", precision = 19, scale = 2)
     private BigDecimal baseCurrencyAmount;
 
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private TransactionStatus status;
+
+    @Column(name = "reverses_transaction_id", updatable = false)
+    private UUID reversesTransactionId;
+
+    @Column(name = "reversal_reason", length = 500)
+    private String reversalReason;
+
     protected Transaction() {
         // required by JPA
     }
@@ -76,7 +93,53 @@ public class Transaction {
         this.transactionDate = transactionDate;
         this.currency = currency;
         this.baseCurrencyAmount = baseCurrencyAmount;
+        this.status = TransactionStatus.POSTED;
         this.createdAt = Instant.now();
+    }
+
+    /**
+     * Milestone 21 — the compensating entry for {@code original}: same user,
+     * category, type, date and currency, negated amounts, status
+     * {@link TransactionStatus#REVERSAL}, linked back through
+     * {@code reversesTransactionId}.
+     */
+    public static Transaction reversalOf(Transaction original, String reason) {
+        Transaction reversal = new Transaction(
+                original.getUserId(),
+                original.getCategory(),
+                original.getAmount().negate(),
+                original.getType(),
+                "Reversal of " + original.getId(),
+                original.getTransactionDate(),
+                original.getCurrency(),
+                original.getBaseCurrencyAmount() == null ? null : original.getBaseCurrencyAmount().negate());
+        reversal.status = TransactionStatus.REVERSAL;
+        reversal.reversesTransactionId = original.getId();
+        reversal.reversalReason = truncate(reason);
+        return reversal;
+    }
+
+    /**
+     * Milestone 21 — flips a POSTED entry to REVERSED. Only POSTED entries can
+     * be reversed; the caller checks {@link #isPosted()} first, so a second
+     * rejection of the same entry is a no-op rather than an error.
+     *
+     * @throws IllegalStateException if this entry is not POSTED
+     */
+    public void markReversed(String reason) {
+        if (status != TransactionStatus.POSTED) {
+            throw new IllegalStateException("Transaction %s is %s, only POSTED can be reversed".formatted(id, status));
+        }
+        this.status = TransactionStatus.REVERSED;
+        this.reversalReason = truncate(reason);
+    }
+
+    public boolean isPosted() {
+        return status == TransactionStatus.POSTED;
+    }
+
+    private static String truncate(String reason) {
+        return reason == null || reason.length() <= 500 ? reason : reason.substring(0, 500);
     }
 
     public UUID getId() {
@@ -117,5 +180,17 @@ public class Transaction {
 
     public BigDecimal getBaseCurrencyAmount() {
         return baseCurrencyAmount;
+    }
+
+    public TransactionStatus getStatus() {
+        return status;
+    }
+
+    public UUID getReversesTransactionId() {
+        return reversesTransactionId;
+    }
+
+    public String getReversalReason() {
+        return reversalReason;
     }
 }

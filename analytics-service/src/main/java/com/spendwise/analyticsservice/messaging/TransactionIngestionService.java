@@ -25,7 +25,7 @@ import reactor.core.publisher.Mono;
  * the Kafka consumer thread) is not visible, and before the commit. The
  * listener logs the outcome after {@code block()} returns instead — on the
  * consumer thread, and only once the transaction has committed. The
- * {@code event} parameter is unused until Milestone 23 writes projections from it.
+ * {@code event} parameters are unused until Milestone 23 writes projections from them.
  */
 @Service
 public class TransactionIngestionService {
@@ -46,6 +46,22 @@ public class TransactionIngestionService {
      * delivery), {@code false} if it had already been processed.
      */
     public Mono<Boolean> ingest(EventIdentity eventIdentity, TransactionCreatedEvent event) {
+        return processedEventGuard.claim(CONSUMER, eventIdentity)
+                .as(transactionalOperator::transactional);
+    }
+
+    /**
+     * Milestone 21 — the read side of the saga's compensation (Functional
+     * Roadmap, Workflow 2, Step 6): a reversed entry must leave the read model
+     * exactly as if it had never been ingested. Same claim, same transaction
+     * as {@link #ingest}, so a redelivered reversal can never retract twice;
+     * Milestone 23 subtracts the entry from the projections inside this
+     * pipeline, after the claim.
+     *
+     * @return a {@code Mono} of {@code true} on first delivery, {@code false}
+     * for a duplicate
+     */
+    public Mono<Boolean> retract(EventIdentity eventIdentity, TransactionReversedEvent event) {
         return processedEventGuard.claim(CONSUMER, eventIdentity)
                 .as(transactionalOperator::transactional);
     }

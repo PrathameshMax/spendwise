@@ -1,5 +1,7 @@
 package com.spendwise.budgetservice.api;
 
+import com.spendwise.budgetservice.domain.BudgetEnforcement;
+
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.YearMonth;
@@ -12,5 +14,6 @@ public record BudgetResponse(
         BigDecimal cappedAmount,
         BigDecimal currentSpend,
         YearMonth periodMonth,
-        Instant createdAt) {
+        Instant createdAt,
+        BudgetEnforcement enforcement) {
 }

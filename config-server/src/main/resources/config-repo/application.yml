@@ -70,6 +70,40 @@ spring:
       # (KafkaTemplate observation, Milestone 17): publish and consume are one
       # trace in Zipkin.
       observation-enabled: true
+    # Milestone 21 — producer settings shared by every service that publishes:
+    # transaction-service's outbox relay (Milestone 17), budget-service's
+    # saga decisions (Milestone 21), and every service's DLT recoverer
+    # (Milestone 20). Moved here from transaction-service.yml unchanged.
+    producer:
+      # acks=all + idempotence: the broker acknowledges only once every
+      # in-sync replica (min.insync.replicas=2 on the topic) has the record,
+      # and producer-side retries can never write a record twice to the log.
+      acks: all
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      properties:
+        enable.idempotence: true
+        max.in.flight.requests.per.connection: 5
+        # Bounded so a publisher holding row locks or an open transaction can't
+        # stall for the client defaults (60s metadata wait, 120s delivery
+        # timeout) when the cluster is unreachable.
+        # delivery.timeout.ms must be >= linger.ms + request.timeout.ms.
+        max.block.ms: 5000
+        request.timeout.ms: 5000
+        delivery.timeout.ms: 10000
+        linger.ms: 0
+    template:
+      # Micrometer observation on KafkaTemplate: a producer span per send and
+      # a W3C traceparent header on each record, which consumers continue.
+      observation-enabled: true
+    admin:
+      # Topics are provisioned lazily via KafkaAdmin (OutboxPublisher,
+      # BudgetEventPublisher); these keep an unreachable cluster from blocking
+      # for the client defaults.
+      operation-timeout: 5s
+      properties:
+        request.timeout.ms: 5000
+        default.api.timeout.ms: 5000
   jpa:
     open-in-view: false
     hibernate:
@@ -182,6 +216,9 @@ spendwise:
   kafka:
     topics:
       transaction-events: transaction-events
+      # Milestone 21 — budget-service's saga decisions (TransactionRejectedEvent),
+      # consumed by transaction-service's TransactionRejectionListener.
+      budget-events: budget-events
     # Milestone 20 — every listener's bounded retry policy before a failed
     # record is published to <topic>.DLT (SpendwiseKafkaConsumerAutoConfiguration).
     # 3 retries x 1s: a poison record holds its partition for ~3s, then moves aside.

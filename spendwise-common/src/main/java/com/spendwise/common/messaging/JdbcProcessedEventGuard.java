@@ -1,14 +1,20 @@
-package com.spendwise.notificationservice.messaging;
+package com.spendwise.common.messaging;
 
-import com.spendwise.common.messaging.EventIdentity;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Milestone 19 — the tracking filter's check-and-claim, against the
- * {@code processed_events} constraint.
+ * Milestone 19 (moved here from notification-service at Milestone 21, when
+ * transaction-service and budget-service became consumers too) — the
+ * tracking filter's check-and-claim, against a {@code processed_events}
+ * table in the consuming service's own database. Every JPA/JDBC consumer
+ * declares it as a bean and owns a {@code processed_events} table of this
+ * shape: {@code (consumer VARCHAR(100), event_id VARCHAR(200), processed_at
+ * TIMESTAMP, PRIMARY KEY (consumer, event_id))}. Not a component and not
+ * auto-configured: a service opts in by declaring the bean, which keeps
+ * services without that table (auth-service, user-service) from getting a
+ * guard that would fail on first use.
  *
  * <p><b>Claim, don't check.</b> A separate "SELECT, then INSERT if absent" has
  * a race: two deliveries of the same event (a redelivery to the new partition
@@ -33,8 +39,7 @@ import org.springframework.transaction.annotation.Transactional;
  * service's JPA writes, because {@code JpaTransactionManager} exposes its
  * connection to JDBC access code.
  */
-@Component
-public class ProcessedEventGuard {
+public class JdbcProcessedEventGuard {
 
     private static final String CLAIM_SQL = """
             INSERT INTO processed_events (consumer, event_id, processed_at)
@@ -44,7 +49,7 @@ public class ProcessedEventGuard {
 
     private final JdbcTemplate jdbcTemplate;
 
-    public ProcessedEventGuard(JdbcTemplate jdbcTemplate) {
+    public JdbcProcessedEventGuard(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
     }
 

@@ -33,8 +33,10 @@ import org.springframework.util.backoff.FixedBackOff;
  * Boot's {@code @ConditionalOnMissingBean}-guarded listener container factory
  * is defined; Boot then applies them as the unique {@code RecordInterceptor}
  * and {@code ConsumerAwareRebalanceListener} beans of the context.
- * transaction-service also has spring-kafka (it produces) but no listener;
- * the beans there are inert, and the endpoint is not exposed there.
+ * Since Milestone 21 every Kafka service has a listener — transaction-service
+ * on {@code budget-events}, budget-service on {@code transaction-events} — so
+ * these beans are live in all four; the assignments endpoint is exposed only
+ * where a service's config lists it.
  *
  * <p>The meter registry is resolved through {@link ObjectProvider} rather
  * than guarded with {@code @ConditionalOnBean}: a bean condition in an
@@ -95,8 +97,10 @@ public class SpendwiseKafkaConsumerAutoConfiguration {
      * </ul>
      *
      * <p>The recoverer publishes through Boot's auto-configured
-     * {@code KafkaTemplate}, with kafka-clients' producer defaults
-     * ({@code acks=all}, idempotence on) and the String serializers that
+     * {@code KafkaTemplate}, with the platform's shared
+     * {@code spring.kafka.producer.*} settings (config-repo/application.yml
+     * since Milestone 21: {@code acks=all}, idempotence on, bounded timeouts)
+     * and the String serializers that
      * match these listeners' String deserializers, so the dead-lettered value
      * is byte-for-byte what was consumed.
      */

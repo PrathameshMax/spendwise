@@ -43,7 +43,8 @@ public class BudgetService {
         }
 
         Budget saved = budgetRepository.save(new Budget(
-                request.userId(), request.category(), request.cappedAmount(), request.periodMonth()));
+                request.userId(), request.category(), request.cappedAmount(), request.periodMonth(),
+                request.enforcementOrDefault()));
         return budgetMapper.toResponse(saved);
     }
 

@@ -116,6 +116,14 @@
             <artifactId>spring-kafka</artifactId>
             <optional>true</optional>
         </dependency>
+        <!-- Milestone 21 — JdbcTemplate and @Transactional for JdbcProcessedEventGuard,
+             shared by the three JPA services that consume Kafka. Optional: present in
+             those services through spring-boot-starter-data-jpa already. -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-jdbc</artifactId>
+            <optional>true</optional>
+        </dependency>
         <!-- Milestone 18 — Counter/MeterRegistry for the consumed-records metric.
              Every consuming service already has it through spring-boot-starter-actuator. -->
         <dependency>

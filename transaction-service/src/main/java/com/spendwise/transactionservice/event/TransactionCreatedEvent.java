@@ -33,11 +33,18 @@ import java.util.UUID;
  * business/domain-shaped contracts. The question of whether a future
  * consumer duplicates this shape or the two share one is Milestone 17+'s
  * to answer, once a consumer actually exists to have an opinion.
+ *
+ * <p>Milestone 21 — {@code categoryName} added, because budget-service matches
+ * budgets on the category name, not transaction_db's category id. Added, not
+ * renamed or replaced: every existing consumer is a tolerant reader and keeps
+ * working, and consumers that need the new field handle events published
+ * before it existed (Q64).
  */
 public record TransactionCreatedEvent(
         UUID transactionId,
         UUID userId,
         UUID categoryId,
+        String categoryName,
         BigDecimal amount,
         TransactionType type,
         LocalDate transactionDate,

@@ -406,11 +406,22 @@ services:
       CONFIG_SERVER_URL: http://config-server:8888
       EUREKA_HOST: discovery-server
       MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
+      # Milestone 21 — budget-service consumes transaction-events and publishes
+      # budget-events (the budget-breach saga).
+      KAFKA_BOOTSTRAP_SERVERS: kafka-1:19092,kafka-2:19092,kafka-3:19092
     depends_on:
       config-server:
         condition: service_healthy
       postgres-db-init:
         condition: service_completed_successfully
+      # service_started, as for transaction-service: the REST and gRPC budget
+      # APIs stay up while Kafka is down; the consumer catches up when it returns.
+      kafka-1:
+        condition: service_started
+      kafka-2:
+        condition: service_started
+      kafka-3:
+        condition: service_started
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8084/actuator/health"]

@@ -2,6 +2,8 @@ package com.spendwise.budgetservice.domain;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -16,8 +18,12 @@ import java.util.UUID;
  * category is a plain denormalized string, not a foreign key into Transaction
  * Service's categories table — budget_db must never depend on another service's
  * schema. currentSpend starts at zero and is only ever mutated by the Kafka-driven
- * consumer introduced in Milestone 18 onward; there is no producer of spend
- * updates yet at this milestone.
+ * consumer, {@code BudgetSpendService} (Milestone 21), through
+ * {@link #applySpend(BigDecimal)}.
+ *
+ * <p>Milestone 21 — {@link #enforcement} decides what happens when an expense
+ * would take spend past the cap: {@link #wouldBreachHardCap(BigDecimal)} is the
+ * single rule the saga's compensation hinges on.
  */
 @Entity
 @Table(name = "budgets")
@@ -45,17 +51,46 @@ public class Budget {
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 10)
+    private BudgetEnforcement enforcement;
+
     protected Budget() {
         // required by JPA
     }
 
     public Budget(UUID userId, String category, BigDecimal cappedAmount, YearMonth periodMonth) {
+        this(userId, category, cappedAmount, periodMonth, BudgetEnforcement.SOFT);
+    }
+
+    public Budget(UUID userId, String category, BigDecimal cappedAmount, YearMonth periodMonth,
+                  BudgetEnforcement enforcement) {
         this.userId = userId;
         this.category = category;
         this.cappedAmount = cappedAmount;
         this.currentSpend = BigDecimal.ZERO;
         this.periodMonth = periodMonth;
+        this.enforcement = enforcement;
         this.createdAt = Instant.now();
+    }
+
+    /**
+     * Milestone 21 — {@code true} only for a HARD budget whose spend would
+     * end up strictly above the cap: landing exactly on the cap is allowed.
+     * A SOFT budget never breaches; it is allowed to run over.
+     */
+    public boolean wouldBreachHardCap(BigDecimal expense) {
+        return enforcement == BudgetEnforcement.HARD
+                && currentSpend.add(expense).compareTo(cappedAmount) > 0;
+    }
+
+    /**
+     * Milestone 21 — adds an accepted expense to this month's spend. The
+     * entity is managed inside the consumer's transaction, so the change is
+     * flushed as an UPDATE at commit.
+     */
+    public void applySpend(BigDecimal expense) {
+        this.currentSpend = this.currentSpend.add(expense);
     }
 
     public UUID getId() {
@@ -84,5 +119,9 @@ public class Budget {
 
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    public BudgetEnforcement getEnforcement() {
+        return enforcement;
     }
 }

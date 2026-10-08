@@ -31,3 +31,16 @@ management:
 grpc:
   server:
     port: 9090
+
+# Milestone 21 — the topic budget-service publishes its saga decisions to
+# (TransactionRejectedEvent), provisioned lazily by BudgetEventPublisher with
+# the same durability as transaction-events. Producer settings themselves
+# (acks=all, idempotence, timeouts) are shared in config-repo/application.yml.
+spendwise:
+  budget-events:
+    topic: budget-events
+    partitions: 3
+    replication-factor: 3
+    min-in-sync-replicas: 2
+    send-timeout: 5s
+    dead-letter-retention: 30d

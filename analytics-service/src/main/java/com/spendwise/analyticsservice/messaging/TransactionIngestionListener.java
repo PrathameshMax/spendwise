@@ -52,6 +52,14 @@ import java.time.YearMonth;
  * failure (retried by the error handler) instead of a consumer stalled
  * forever, and stays well under {@code max.poll.interval.ms} (5 minutes).
  *
+ * <p><b>Reversals (Milestone 21).</b> {@code TransactionReversedEvent} arrives
+ * on the same topic, on the same partition as and after the
+ * {@code TransactionCreatedEvent} it cancels (both are keyed by the original
+ * transaction id). It is handled by this same listener, dispatched on the
+ * {@code eventType} header — a second listener in this group would take half
+ * the partitions — and logged as a read-side retraction; subtracting it from
+ * the projections is Milestone 23.
+ *
  * <p>Any failure here — an unparseable payload, a timed-out ingest — is
  * rethrown to the platform's error handler (Milestone 20, spendwise-common):
  * retried 3 times, 1 s apart, then published to {@code transaction-events.DLT},
@@ -60,7 +68,8 @@ import java.time.YearMonth;
 @Component
 public class TransactionIngestionListener {
 
-    static final String HANDLED_EVENT_TYPE = "TransactionCreatedEvent";
+    static final String CREATED_EVENT_TYPE = "TransactionCreatedEvent";
+    static final String REVERSED_EVENT_TYPE = "TransactionReversedEvent";
 
     private static final Logger log = LoggerFactory.getLogger(TransactionIngestionListener.class);
 
@@ -82,12 +91,17 @@ public class TransactionIngestionListener {
             topics = "${spendwise.kafka.topics.transaction-events}")
     public void onTransactionEvent(ConsumerRecord<String, String> record) {
         String eventType = header(record, EventHeaders.EVENT_TYPE);
-        if (!HANDLED_EVENT_TYPE.equals(eventType)) {
+        if (CREATED_EVENT_TYPE.equals(eventType)) {
+            onCreated(record, parse(record, TransactionCreatedEvent.class));
+        } else if (REVERSED_EVENT_TYPE.equals(eventType)) {
+            onReversed(record, parse(record, TransactionReversedEvent.class));
+        } else {
             log.debug("Skipping {} at {}-{}@{}: not handled by this listener",
                     eventType, record.topic(), record.partition(), record.offset());
-            return;
         }
-        TransactionCreatedEvent event = parse(record);
+    }
+
+    private void onCreated(ConsumerRecord<String, String> record, TransactionCreatedEvent event) {
         EventIdentity eventIdentity = EventIdentity.of(record);
         Boolean firstDelivery = transactionIngestionService.ingest(eventIdentity, event).block(INGEST_TIMEOUT);
         boolean processed = Boolean.TRUE.equals(firstDelivery);
@@ -103,12 +117,29 @@ public class TransactionIngestionListener {
         }
     }
 
-    private TransactionCreatedEvent parse(ConsumerRecord<String, String> record) {
+    private void onReversed(ConsumerRecord<String, String> record, TransactionReversedEvent event) {
+        EventIdentity eventIdentity = EventIdentity.of(record);
+        Boolean firstDelivery = transactionIngestionService.retract(eventIdentity, event).block(INGEST_TIMEOUT);
+        boolean processed = Boolean.TRUE.equals(firstDelivery);
+        IdempotencyMetrics.record(meterRegistry, TransactionIngestionService.CONSUMER, processed);
+        if (processed) {
+            log.info("Read-side retraction: transaction {} reversed by {} — user {}, month {}, category {}, {} {} {} (base amount {}) removed; reason: {}; event {}, partition {} offset {}",
+                    event.transactionId(), event.reversalTransactionId(), event.userId(),
+                    YearMonth.from(event.transactionDate()), event.categoryId(), event.type(), event.amount(),
+                    event.currency(), event.baseCurrencyAmount(), event.reason(), eventIdentity,
+                    record.partition(), record.offset());
+        } else {
+            log.info("Duplicate delivery of event {} for transaction {} discarded (partition {} offset {})",
+                    eventIdentity, event.transactionId(), record.partition(), record.offset());
+        }
+    }
+
+    private <T> T parse(ConsumerRecord<String, String> record, Class<T> type) {
         try {
-            return objectMapper.readValue(record.value(), TransactionCreatedEvent.class);
+            return objectMapper.readValue(record.value(), type);
         } catch (JsonProcessingException ex) {
-            throw new IllegalArgumentException("Unparseable TransactionCreatedEvent at %s-%d@%d"
-                    .formatted(record.topic(), record.partition(), record.offset()), ex);
+            throw new IllegalArgumentException("Unparseable %s at %s-%d@%d"
+                    .formatted(type.getSimpleName(), record.topic(), record.partition(), record.offset()), ex);
         }
     }
 

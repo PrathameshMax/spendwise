@@ -1,6 +1,7 @@
 package com.spendwise.notificationservice.messaging;
 
 import com.spendwise.common.messaging.EventIdentity;
+import com.spendwise.common.messaging.JdbcProcessedEventGuard;
 import com.spendwise.common.tracing.CorrelationIdConstants;
 import com.spendwise.notificationservice.domain.NotificationLog;
 import com.spendwise.notificationservice.domain.NotificationLogRepository;
@@ -12,12 +13,14 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import java.util.UUID;
+
 /**
  * Milestone 19 — the idempotent unit of work behind
  * {@link TransactionAlertListener}: claim the event, record the alert, and
  * dispatch it only once both are committed.
  *
- * <p><b>One transaction.</b> {@link ProcessedEventGuard#claim} and the
+ * <p><b>One transaction.</b> {@link JdbcProcessedEventGuard#claim} and the
  * {@code notification_log} insert commit together. If anything fails after
  * the claim, both roll back, the listener rethrows, and the retry is treated
  * as a first delivery again — no event is ever marked processed without its
@@ -33,18 +36,23 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
  * marked processed). For an alert, at-most-once delivery from this point is
  * the right trade; a channel that needs stronger guarantees would get its own
  * outbox, as transaction-service has.
+ *
+ * <p>Milestone 21 adds the second alert kind, {@link #recordReversalAlert}:
+ * both kinds share one consumer name in {@code processed_events} because
+ * every event has its own id, whatever its type.
  */
 @Service
 public class TransactionAlertService {
 
     static final String CONSUMER = "transaction-alerts";
+    private static final int MAX_MESSAGE_LENGTH = 500;
 
     private static final Logger log = LoggerFactory.getLogger(TransactionAlertService.class);
 
-    private final ProcessedEventGuard processedEventGuard;
+    private final JdbcProcessedEventGuard processedEventGuard;
     private final NotificationLogRepository notificationLogRepository;
 
-    public TransactionAlertService(ProcessedEventGuard processedEventGuard,
+    public TransactionAlertService(JdbcProcessedEventGuard processedEventGuard,
                                    NotificationLogRepository notificationLogRepository) {
         this.processedEventGuard = processedEventGuard;
         this.notificationLogRepository = notificationLogRepository;
@@ -56,23 +64,41 @@ public class TransactionAlertService {
      */
     @Transactional
     public boolean recordAlert(EventIdentity eventIdentity, TransactionCreatedEvent event) {
+        String message = "%s of %s %s recorded for %s".formatted(
+                event.type(), event.amount(), event.currency(), event.transactionDate());
+        return record(eventIdentity, event.userId(), event.transactionId(), message);
+    }
+
+    /**
+     * Milestone 21 — the saga's user-facing end (Functional Roadmap,
+     * Workflow 2, Step 5): tells the user an entry they already saw recorded
+     * was rejected and reversed, and why. Same guard, same transaction, same
+     * after-commit dispatch as {@link #recordAlert}.
+     */
+    @Transactional
+    public boolean recordReversalAlert(EventIdentity eventIdentity, TransactionReversedEvent event) {
+        String message = "%s of %s %s on %s (%s) was rejected and reversed: %s".formatted(
+                event.type(), event.amount(), event.currency(), event.transactionDate(),
+                event.categoryName(), event.reason());
+        return record(eventIdentity, event.userId(), event.transactionId(), message);
+    }
+
+    private boolean record(EventIdentity eventIdentity, UUID userId, UUID transactionId, String text) {
         if (!processedEventGuard.claim(CONSUMER, eventIdentity)) {
-            log.info("Duplicate delivery of event {} for transaction {} discarded",
-                    eventIdentity, event.transactionId());
+            log.info("Duplicate delivery of event {} for transaction {} discarded", eventIdentity, transactionId);
             return false;
         }
 
-        String message = "%s of %s %s recorded for %s".formatted(
-                event.type(), event.amount(), event.currency(), event.transactionDate());
+        String message = text.length() <= MAX_MESSAGE_LENGTH ? text : text.substring(0, MAX_MESSAGE_LENGTH);
         NotificationLog alert = notificationLogRepository.save(new NotificationLog(
-                eventIdentity.id(), event.userId(), event.transactionId(),
+                eventIdentity.id(), userId, transactionId,
                 NotificationLog.CHANNEL_SIMULATED_PUSH, message, MDC.get(CorrelationIdConstants.MDC_KEY)));
 
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCommit() {
                 log.info("[SIMULATED PUSH] to user {}: {} (transaction {}, alert {})",
-                        event.userId(), message, event.transactionId(), alert.getId());
+                        userId, message, transactionId, alert.getId());
             }
         });
         return true;

@@ -41,9 +41,15 @@ import java.nio.charset.StandardCharsets;
  * and skips the event if the claim already exists. A duplicate is still
  * acknowledged — it must not be retried — and is counted under
  * {@code spendwise.kafka.events.idempotency{outcome=duplicate}}. Dispatch is
- * still simulated (a log line, after commit). Records of any other event type on
- * this topic are skipped, so a future event (Milestone 21's
- * {@code TransactionReversedEvent}) cannot be mis-read as a new transaction.
+ * still simulated (a log line, after commit).
+ *
+ * <p><b>Two event types, one listener (Milestone 21).</b> The topic now also
+ * carries {@code TransactionReversedEvent}, the end of the budget-breach
+ * saga. It is dispatched here, by the {@code eventType} header, rather than by
+ * a second {@code @KafkaListener}: two listeners on one topic in one consumer
+ * group would split the topic's partitions between them, and each would only
+ * ever see some of either event type. Any other type is skipped, so a future
+ * event cannot be mis-read as one of these.
  *
  * <p>A payload that cannot be parsed is rethrown. The platform's error handler
  * (Milestone 20, spendwise-common) retries it 3 times, 1 s apart, then
@@ -53,7 +59,8 @@ import java.nio.charset.StandardCharsets;
 @Component
 public class TransactionAlertListener {
 
-    static final String HANDLED_EVENT_TYPE = "TransactionCreatedEvent";
+    static final String CREATED_EVENT_TYPE = "TransactionCreatedEvent";
+    static final String REVERSED_EVENT_TYPE = "TransactionReversedEvent";
 
     private static final Logger log = LoggerFactory.getLogger(TransactionAlertListener.class);
 
@@ -72,25 +79,30 @@ public class TransactionAlertListener {
             topics = "${spendwise.kafka.topics.transaction-events}")
     public void onTransactionEvent(ConsumerRecord<String, String> record) {
         String eventType = header(record, EventHeaders.EVENT_TYPE);
-        if (!HANDLED_EVENT_TYPE.equals(eventType)) {
+        EventIdentity eventIdentity = EventIdentity.of(record);
+        boolean firstDelivery;
+        if (CREATED_EVENT_TYPE.equals(eventType)) {
+            firstDelivery = transactionAlertService.recordAlert(eventIdentity,
+                    parse(record, TransactionCreatedEvent.class));
+        } else if (REVERSED_EVENT_TYPE.equals(eventType)) {
+            firstDelivery = transactionAlertService.recordReversalAlert(eventIdentity,
+                    parse(record, TransactionReversedEvent.class));
+        } else {
             log.debug("Skipping {} at {}-{}@{}: not handled by this listener",
                     eventType, record.topic(), record.partition(), record.offset());
             return;
         }
-        TransactionCreatedEvent event = parse(record);
-        EventIdentity eventIdentity = EventIdentity.of(record);
-        boolean firstDelivery = transactionAlertService.recordAlert(eventIdentity, event);
         IdempotencyMetrics.record(meterRegistry, TransactionAlertService.CONSUMER, firstDelivery);
-        log.debug("Event {} from partition {} offset {}: {}", eventIdentity, record.partition(), record.offset(),
-                firstDelivery ? "processed" : "duplicate, skipped");
+        log.debug("{} {} from partition {} offset {}: {}", eventType, eventIdentity, record.partition(),
+                record.offset(), firstDelivery ? "processed" : "duplicate, skipped");
     }
 
-    private TransactionCreatedEvent parse(ConsumerRecord<String, String> record) {
+    private <T> T parse(ConsumerRecord<String, String> record, Class<T> type) {
         try {
-            return objectMapper.readValue(record.value(), TransactionCreatedEvent.class);
+            return objectMapper.readValue(record.value(), type);
         } catch (JsonProcessingException ex) {
-            throw new IllegalArgumentException("Unparseable TransactionCreatedEvent at %s-%d@%d"
-                    .formatted(record.topic(), record.partition(), record.offset()), ex);
+            throw new IllegalArgumentException("Unparseable %s at %s-%d@%d"
+                    .formatted(type.getSimpleName(), record.topic(), record.partition(), record.offset()), ex);
         }
     }
 

@@ -73,6 +73,18 @@
             <groupId>io.github.resilience4j</groupId>
             <artifactId>resilience4j-spring-boot3</artifactId>
         </dependency>
+        <!-- Milestone 21 — budget-service joins the event stream in both
+             directions: a @KafkaListener on transaction-events (applying spend,
+             detecting HARD-cap breaches) and a KafkaTemplate publishing the
+             compensating TransactionRejectedEvent to budget-events. Version
+             managed by spring-boot-dependencies; consumer/producer settings come
+             from config-repo/application.yml, and spendwise-common's
+             SpendwiseKafkaConsumerAutoConfiguration contributes the MDC
+             interceptor, assignment logging and DLT error handler. -->
+        <dependency>
+            <groupId>org.springframework.kafka</groupId>
+            <artifactId>spring-kafka</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
