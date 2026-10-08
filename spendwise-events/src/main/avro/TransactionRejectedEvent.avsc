@@ -1,0 +1,18 @@
+{
+  "type": "record",
+  "name": "TransactionRejectedEvent",
+  "namespace": "com.spendwise.events.avro",
+  "doc": "budget-service rejected an already-recorded transaction because it would breach a HARD budget (Functional Roadmap, Workflow 2, Step 3). Published to budget-events, keyed by transactionId.",
+  "fields": [
+    {"name": "transactionId", "type": "string", "doc": "UUID of the rejected ledger entry."},
+    {"name": "userId", "type": "string", "doc": "UUID of the owning user."},
+    {"name": "budgetId", "type": "string", "doc": "UUID of the breached budget."},
+    {"name": "category", "type": "string", "doc": "Category name the budget is for."},
+    {"name": "periodMonth", "type": "string", "doc": "Budget month, yyyy-MM."},
+    {"name": "cappedAmount", "type": {"type": "bytes", "logicalType": "decimal", "precision": 19, "scale": 2}, "doc": "The budget's cap."},
+    {"name": "currentSpend", "type": {"type": "bytes", "logicalType": "decimal", "precision": 19, "scale": 2}, "doc": "Spend before this expense."},
+    {"name": "attemptedAmount", "type": {"type": "bytes", "logicalType": "decimal", "precision": 19, "scale": 2}, "doc": "The expense that would have breached the cap."},
+    {"name": "reason", "type": "string", "doc": "Human-readable rejection reason."},
+    {"name": "rejectedAt", "type": {"type": "long", "logicalType": "timestamp-millis"}, "doc": "When the decision was made."}
+  ]
+}

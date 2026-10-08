@@ -1,0 +1,30 @@
+# Milestone 22 — Kafka UI (kafbat v1.4.2) configuration, mounted by
+# docker-compose.yml. Replaces the KAFKA_CLUSTERS_0_* environment variables
+# of Milestones 17-20, unchanged, and adds the Schema Registry.
+kafka:
+  clusters:
+    - name: spendwise
+      bootstrapServers: kafka-1:19092,kafka-2:19092,kafka-3:19092
+      # Milestone 20 — writable: the chaos labs produce records through the UI's API.
+      readOnly: false
+      # Every Avro record on every topic is shown decoded (the built-in
+      # "SchemaRegistry" serde reads the schema id in each record).
+      schemaRegistry: http://schema-registry:8081
+      # Producing Avro needs to know which subject's latest schema to encode
+      # with. The built-in serde derives it as "<topic>-value"; this platform
+      # uses TopicRecordNameStrategy ("<topic>-<record full name>"), so one
+      # named serde per record type that the Postman plans produce:
+      #   TransactionCreatedAvro  -> transaction-events (Milestone 20 chaos lab)
+      #   TransactionRejectedAvro -> budget-events (Milestone 21 replay)
+      # Each subject must already exist, i.e. its producer has sent at least once.
+      serde:
+        - name: TransactionCreatedAvro
+          className: io.kafbat.ui.serdes.builtin.sr.SchemaRegistrySerde
+          properties:
+            url: http://schema-registry:8081
+            schemaNameTemplate: "%s-com.spendwise.events.avro.TransactionCreatedEvent"
+        - name: TransactionRejectedAvro
+          className: io.kafbat.ui.serdes.builtin.sr.SchemaRegistrySerde
+          properties:
+            url: http://schema-registry:8081
+            schemaNameTemplate: "%s-com.spendwise.events.avro.TransactionRejectedEvent"

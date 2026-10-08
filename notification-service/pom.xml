@@ -54,6 +54,18 @@
             <groupId>org.springframework.kafka</groupId>
             <artifactId>spring-kafka</artifactId>
         </dependency>
+        <!-- Milestone 22 — the platform's Avro event contracts (generated classes)
+             and Confluent's Schema Registry-aware serializer/deserializer, which
+             config-repo/application.yml selects for every producer and consumer.
+             Versions managed in the parent pom. -->
+        <dependency>
+            <groupId>com.spendwise</groupId>
+            <artifactId>spendwise-events</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.confluent</groupId>
+            <artifactId>kafka-avro-serializer</artifactId>
+        </dependency>
         <!-- Milestone 18 — tracing, skipped for this service at Milestone 3 because
              it had no entry point to trace. With spring.kafka.listener.observation-enabled
              the listener now continues the producer's trace from the record's

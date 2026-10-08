@@ -116,8 +116,10 @@ mvn -pl user-service spring-boot:run
 # on an existing volume, then exits) and the three Kafka brokers, which
 # transaction-service's outbox publisher reaches on the host-published ports
 # its ${KAFKA_BOOTSTRAP_SERVERS:localhost:29092,...} default already lists.
+# Milestone 22 adds schema-registry, published on localhost:8091 — the
+# ${SCHEMA_REGISTRY_URL:http://localhost:8091} default in config-repo/application.yml.
 docker compose -f docker-compose.yml -f docker-compose.override.ide.yml \
-  up -d zipkin postgres postgres-db-init redis kafka-1 kafka-2 kafka-3 prometheus grafana
+  up -d zipkin postgres postgres-db-init redis kafka-1 kafka-2 kafka-3 schema-registry prometheus grafana
 ```
 
 As of Milestone 6, `api-gateway` (port 8080) is the intended entry point for every
@@ -2424,7 +2426,7 @@ notification-service at one replica.
 | --- | --- | --- |
 | 1. Preconditions and baselines | DLT provisioned; starting counts | `transaction-events.DLT` `200`, 3 partitions, RF 3; metric baselines `200`/`404` |
 | 2. Inject | a poison pill, then a valid record behind it, both on partition 0 | both `200` from Kafka UI's API |
-| 3. Verify | retried 3 times, parked, partition kept moving | per consumer group: `consumed{outcome=failure}` +4 (1 + 3 retries), `deadlettered` +1, valid record `processed` +1; DLT partition 0 +2 records (one per group) |
+| 3. Verify | retried 3 times, parked, partition kept moving | per consumer group: `consumed{outcome=failure}` +4 (1 + 3 retries), `deadlettered` +1, valid record `processed` +1; DLT partition 0 +2 records (one per group). **Since Milestones 21–22:** +3 DLT records (budget-service is a third group), and `consumed{outcome=failure}` +1, because a record that is not Avro fails in deserialization, which is not retried |
 
 **In Kafka UI**, Topics → `transaction-events.DLT` → Messages → open a copy.
 Expect `kafka_dlt-original-topic: transaction-events`,
@@ -2750,7 +2752,7 @@ prints it in the Postman Console:
 docker compose logs transaction-service budget-service notification-service analytics-service | grep m21-saga-
 ```
 Expect, in order:
-- budget-service: `Transaction … rejected: HARD budget 'M21 Gadgets …' for …: cap 10000.00, spent 6000.00, this expense of 5000 would make it 11000.00`, then
+- budget-service: `Transaction … rejected: HARD budget 'M21 Gadgets …' for …: cap 10000.00, spent 6000.00, this expense of 5000.00 would make it 11000.00` (`5000` before Milestone 22: Avro carries amounts at scale 2), then
   `TransactionRejectedEvent … acknowledged at budget-events-…`;
 - transaction-service: `Transaction … reversed by entry … (-5000.00 INR)`;
 - notification-service: `[SIMULATED PUSH] … EXPENSE of 5000.00 INR on … was rejected and reversed: HARD budget …`;
@@ -2770,6 +2772,324 @@ docker exec -it spendwise-postgres psql -U spendwise -d transaction_db -c "SELEC
 ```
 
 Next: Milestone 22 — Schema Governance (Avro/Protobuf + Schema Registry).
+
+**Milestone 22 complete** — Schema Governance (Avro + Schema Registry).
+Scoped to the roadmap's sentence: every Kafka payload is now an Avro record
+whose schema is registered in a Confluent Schema Registry, replacing the raw
+JSON strings of Milestones 17–21. Plus the governance lab: a deliberately
+incompatible change (removing a required field) is refused by the registry,
+and the same intent, made as an additive change, is accepted. No fixes were
+raised validating Milestone 21.
+
+**One correction to the roadmap's wording, verified, not assumed.** Removing
+a required field is *not* BACKWARD-incompatible. BACKWARD asks "can the new
+schema read old data?", and it can: it just ignores the field. What it breaks
+is old *readers* of new data, which is FORWARD. Under BACKWARD alone the
+registry would accept it. So the registry runs at `FULL_TRANSITIVE`, which
+refuses it, and Postman 3.4–3.5 shows the same change passing once the
+subject is set to BACKWARD. `SchemaEvolutionTest` asserts both directions.
+
+```
+transaction-service ──outbox JSON──▶ OutboxAvroMapper ──▶ KafkaAvroSerializer ──┐
+budget-service ── TransactionRejectedEvent (Avro) ──▶ KafkaAvroSerializer ──────┤ first send of a type:
+                                                                                │ POST /subjects/{s}/versions
+                     Schema Registry (FULL_TRANSITIVE, _schemas topic) ◀────────┘ 200 id  |  409 incompatible
+Kafka record value = 0x00 | 4-byte schema id | Avro binary
+consumers: ErrorHandlingDeserializer → KafkaAvroDeserializer (writer schema by id → reader = compiled class)
+```
+
+**Build**
+
+- **`pom.xml` (root)** — new module `spendwise-events`; versions
+  `confluent.version` 7.9.8 and `avro.version` 1.11.5; the Confluent Maven
+  repository (its serializers aren't on Maven Central); managed
+  `kafka-avro-serializer`, `avro` and `avro-maven-plugin`.
+  - Confluent Platform 7.9 is the line built on Apache Kafka 3.9, the brokers'
+    version, and the image tag below is the same release.
+  - Avro 1.11.5 is what Confluent 7.9.8 builds against.
+  - The serializer declares Kafka as `provided`, so `kafka-clients` stays the
+    version Spring Boot manages.
+- **`spendwise-events`** (new module) — the contracts.
+  - `src/main/avro/TransactionCreatedEvent.avsc`, `TransactionReversedEvent.avsc`
+    and `TransactionRejectedEvent.avsc`, namespace `com.spendwise.events.avro`,
+    with every field documented.
+  - `avro-maven-plugin` generates one `SpecificRecord` class per file. With
+    `stringType` String and `enableDecimalLogicalType`, amounts are
+    `decimal(19,2)` and arrive as `BigDecimal`; `date` becomes `LocalDate` and
+    `timestamp-millis` becomes `Instant`.
+  - Ids are plain strings, and `type` is a string, not an Avro enum: a new value
+    must not break every reader.
+- **Per-consumer JSON copies deleted.** The registered schema is now the
+  contract the Milestone 18 Javadocs said would replace them:
+  - notification-service's and analytics-service's `TransactionCreatedEvent`
+    and `TransactionReversedEvent`;
+  - budget-service's `TransactionCreatedEvent` and its own
+    `TransactionRejectedEvent` record;
+  - transaction-service's `messaging.TransactionRejectedEvent`.
+  In a polyrepo, this module would become a published artifact, or each
+  consumer would download the schemas from the registry.
+- **`SchemaEvolutionTest`** (spendwise-events) — Avro's own
+  `SchemaCompatibility`, the check the registry runs. It asserts:
+  - removing `currency` is backward-compatible but forward-incompatible;
+  - adding optional `baseCurrency` is compatible both ways;
+  - every field has documentation.
+  The candidate schemas are in `src/test/resources/schema-evolution`, the
+  same ones the Postman plan submits.
+
+**Runtime**
+
+- **`docker-compose.yml`**
+  - New `schema-registry` service (`confluentinc/cp-schema-registry:7.9.8`):
+    - published on `127.0.0.1:8091` (8081 is auth-service's port);
+    - stores schemas in the compacted `_schemas` topic, replication factor 3;
+    - global level `FULL_TRANSITIVE`: Milestone 23 replays topics from offset
+      0, so every historical version stays a live writer.
+  - transaction-, budget-, notification- and analytics-service get
+    `SCHEMA_REGISTRY_URL`. Notification and analytics wait for the registry to
+    be healthy. Transaction and budget deliberately don't: the registry waits
+    for Kafka, and those two must start while Kafka is down.
+  - Kafka UI now reads `infra/kafka-ui/config.yml`.
+- **`infra/kafka-ui/config.yml`** (new) — the cluster settings moved out of
+  environment variables, because Spring Boot binds an indexed list from one
+  source only. It adds the registry, so Avro is shown decoded, and two named
+  serdes, `TransactionCreatedAvro` and `TransactionRejectedAvro`, which the
+  Milestone 20 and 21 Postman plans use to *produce* Avro.
+- **`config-repo/application.yml`**
+  - **Producer:** `KafkaAvroSerializer`; `TopicRecordNameStrategy`, so the
+    subject is `<topic>-<record full name>` (transaction-events carries two
+    types, each evolving on its own track); `avro.remove.java.properties`, so
+    the registered schema is plain Avro; `auto.register.schemas` left at its
+    default, true.
+  - **Consumer:** `ErrorHandlingDeserializer` delegating to
+    `KafkaAvroDeserializer` with `specific.avro.reader`.
+
+**spendwise-common**
+
+- **`DeserializationFailureBackOff`** (new) — a failure to decode a record
+  is no longer fatal by type alone. If the Schema Registry was unreachable (an
+  `IOException` in the cause chain, or a registry 5xx), the record is retried
+  every 5 s until the registry answers: the partition waits. Any other
+  deserialization failure gets one attempt and goes to the DLT. Without this,
+  Spring Kafka treats every `DeserializationException` as fatal, so a registry
+  restart would dead-letter live events: a skipped budget check, a lost
+  compensation.
+- **`SpendwiseKafkaConsumerAutoConfiguration`** — installs that back-off (and
+  removes the default fatal classification of `DeserializationException`).
+  The dead-letter recoverer now picks its template by the value's type:
+  - `byte[]`: a copy of Boot's template with `ByteArraySerializer`. A record
+    that couldn't be decoded is parked exactly as it arrived, instead of being
+    wrapped as Avro `bytes` under a new schema.
+  - Anything else: Boot's Avro template.
+
+**transaction-service**
+
+- **`outbox.OutboxAvroMapper`** (new) — converts an outbox row to its Avro
+  record at publish time. `outbox_events.payload` stays JSON, for two reasons:
+  - rows written by the previous release still publish, with no migration;
+  - the business write never calls the registry, so an outage or a refused
+    schema delays delivery but never fails `POST /transactions`.
+  It also sets every amount to scale 2. Avro widens `5000` to `5000.00` by
+  itself, but refuses a value that needs rounding, such as a converted
+  `amount × rate`. The rounding is `HALF_UP`, which is what PostgreSQL applied
+  when it stored the same value in `NUMERIC(19,2)`, so the event and the
+  ledger agree to the cent.
+- **`OutboxPublisher`** — `KafkaTemplate<String, Object>`; the mapping
+  happens inside the send's error handling, so a bad row is retried rather
+  than rolling back the batch. The warning now logs the root cause, which is
+  where the registry's 409 message is. A row whose payload can't be mapped
+  (impossible for the two event types this service writes) would be retried
+  like a failed send and hold back the rows behind it, the same visible stall
+  as a refused schema.
+- **`TransactionRejectionListener`** / **`TransactionReversalService`** —
+  consume the Avro `TransactionRejectedEvent`, dispatching on its type (Java
+  21 pattern matching); ids are parsed from strings.
+
+**budget-service**
+
+- **`BudgetEventPublisher`** — publishes the generated `TransactionRejectedEvent`.
+  A refused or unreachable registry throws, rolling the decision back for
+  redelivery, like an unacknowledged send.
+- **`BudgetSpendService`** / **`TransactionSpendListener`** — read the Avro
+  `TransactionCreatedEvent` and build the Avro rejection.
+
+**notification-service, analytics-service**
+
+- **`TransactionAlertListener`**, **`TransactionIngestionListener`** — a
+  `switch` on the decoded value's type replaces the `eventType` header and
+  JSON parse. The services take the generated classes.
+
+**What changes in behaviour**
+
+- **A record that isn't valid Avro is dead-lettered without retries.**
+  `DeserializationException` is non-retryable, so the Milestone 20 poison now
+  costs one attempt, not four. That plan's expectations are updated: its
+  valid record is produced as Avro, and it expects 3 DLT copies.
+- **An unknown record type is dead-lettered, not skipped.** A type with no
+  generated class in the consumer's build fails deserialization and goes to
+  the DLT, where it can be replayed after the consumer is upgraded. Under
+  Milestone 21's header dispatch it was skipped and its offset committed:
+  lost. The rollout rule from Q64 still applies: consumers before producers.
+- **The registry is now a runtime dependency.** A schema id a consumer hasn't
+  cached must be fetched. While the registry is unreachable, that partition
+  waits and retries every 5 s (`DeserializationFailureBackOff`); nothing is
+  dead-lettered for it. Producers wait too: outbox rows stay pending, and
+  budget decisions roll back and are redelivered. In production the registry
+  runs as several instances behind a load balancer; here, notification- and
+  analytics-service also wait for it to be healthy at startup.
+- **Amounts are carried at scale 2**, so log lines show `5000.00`, not `5000`.
+- **`docker compose down` discards `_schemas`** along with every topic.
+  Producers re-register on their next send.
+
+**Q65: Why use a schema registry instead of raw JSON on a Kafka topic?** A
+topic is a shared, long-lived interface. Whatever one producer writes, every
+consumer, today's and next year's, has to read, possibly from offset 0.
+
+With raw JSON the contract exists only in code: until Milestone 21, five
+hand-kept copies of the same record. Nothing stops a producer from shipping a
+change that breaks a reader, and the break shows up as parse failures in
+production, after the bad data is already on the topic for good. A registry
+gives you:
+- **One versioned contract per subject**, with field documentation, readable
+  by any language.
+- **Enforcement at write time.** The producer's serializer registers its
+  schema, the registry checks it against the subject's history under a
+  declared compatibility rule, and an incompatible schema gets a 409. The
+  record is never written. Here the outbox turns that into a visible stall:
+  the row waits, retried each poll, until a compatible release ships. Nothing
+  is lost or corrupted.
+- **Schema resolution on read.** Each record carries a 4-byte schema id. The
+  consumer fetches the writer's schema and Avro resolves it into the reader's
+  own compiled version. Old and new versions coexist on one topic, which is
+  what makes independent deploys and replay safe.
+- **Compact binary encoding.** No field names repeated in every message, and
+  types such as decimals and dates are exact, not strings someone parses.
+
+In production you would also turn `auto.register.schemas` off and register
+from CI (for example with the schema-registry Maven plugin), so the
+compatibility check fails the build, not the deploy. It is on here so the lab
+can watch the producer itself get refused.
+
+**Q66: BACKWARD vs FORWARD vs FULL — what does each actually permit?**
+
+| Mode | Guarantee | Allowed changes | Upgrade order |
+| --- | --- | --- | --- |
+| BACKWARD (Confluent's default) | the new schema can read data written with the previous one | delete fields; add fields **with defaults** | consumers first |
+| FORWARD | data written with the new schema can be read by the previous one | add fields; delete fields **that had defaults** | producers first |
+| FULL | both | add or delete only fields **with defaults** | either order |
+| `*_TRANSITIVE` | the same, checked against **every** version, not just the latest | as above | as above |
+| NONE | no check | anything | coordinated |
+
+So removing a required field (no default) passes BACKWARD and fails FORWARD
+and FULL. Adding a required field passes FORWARD and fails BACKWARD. Adding
+an optional field with a default passes everything. That is why the fix for
+"I want to drop `currency`" is not a removal: keep `currency`, add what's new
+as optional, migrate consumers, and only once every reader has moved on
+remove a field that by then has a default.
+
+Non-transitive modes only compare with the latest version, so v1 → v2 → v3
+can each be pairwise compatible while v3 can't read v1. That is fatal for a
+topic you replay from the start, hence `FULL_TRANSITIVE` here.
+
+### Validating Milestone 22
+
+As with Milestones 17–21, the authoring sandbox couldn't compile or run this,
+so step 0 is the first real build. What was checked there:
+- all YAML/XML/JSON parses and `docker compose config` passes (with and
+  without the `tools` profile);
+- the three `.avsc` files parse, and the compatibility claims (breaking
+  change: backward yes, forward no; additive change: both yes) were run
+  through Avro's own compatibility checker;
+- every upstream API used was read in source at the exact tag:
+  - Confluent 7.9.8: serializer and deserializer configuration keys,
+    `TopicRecordNameStrategy`, the registration path, specific-reader
+    resolution, and the compatibility, config and version-delete REST
+    endpoints;
+  - Avro 1.11.5: decimal handling in generated classes and the plugin
+    parameters;
+  - spring-kafka 3.3.1: the dead-letter recoverer's map of templates,
+    `KafkaTemplate`'s configuration-override constructor, and how a
+    deserialization failure reaches the error handler;
+  - kafbat v1.4.2: the serde configuration and its JSON-to-Avro conversion
+    (unions, decimals, dates, timestamps);
+- the Kafka UI request bodies were checked to be valid JSON with a valid JSON
+  `value`.
+
+**Step 0 — build, test, start (Git Bash).** The first build downloads
+Confluent's artifacts from `packages.confluent.io`. Build images one at a
+time, as after Milestone 21.
+```bash
+cd /d/spendwise
+./mvnw -q clean test-compile && echo "COMPILE OK"
+./mvnw -q -pl spendwise-events test && echo "SCHEMA TESTS OK"
+for s in discovery-server config-server auth-service user-service transaction-service budget-service notification-service analytics-service api-gateway; do
+  echo "=== building $s ==="; docker compose build "$s" || { echo "FAILED: $s"; break; }
+done
+docker compose up -d
+docker compose --profile tools up -d kafka-ui
+docker compose ps schema-registry
+```
+`schema-registry` should be `healthy`. Pending outbox rows written as JSON by
+Milestone 21 are published as Avro on the first poll.
+
+**Steps 0–5 — Postman, folder `Milestone 22 - Test Plan`** (re-import the
+collection; new variable `schemaRegistryUrl` = `http://localhost:8091`).
+Collection Runner works; 2.1 and 4.5 wait 8 s. Keep notification-service at one
+replica.
+
+| Folder | What it proves | Expected |
+| --- | --- | --- |
+| 0. Registry | global rule | `compatibilityLevel: FULL_TRANSITIVE` |
+| 1. Setup | user, category, one transaction of 1234.5 | `201` ×4; baselines `200`/`404` |
+| 2. Avro end to end | the producer registered its schema; consumers decode it | <ul><li>subject `transaction-events-com.spendwise.events.avro.TransactionCreatedEvent` exists</li><li>latest version: `currency` required, `amount` `decimal(19,2)`, no `avro.java.string`</li><li>notification `processed` +1, analytics `processed` +1</li></ul> |
+| 3. Breaking change | removing required `currency` is refused | <ul><li>compatibility check `is_compatible: false`, message names `currency`</li><li>registering it: `409`, `error_code: 409`, "incompatible"</li><li>no new version</li><li>with the subject at BACKWARD the same check is `true`</li><li>override removed, effective level back to `FULL_TRANSITIVE`</li></ul> |
+| 4. Additive change | optional `baseCurrency` is accepted, and the running producer is unaffected | <ul><li>check `true`, register `200` with an id, one more version</li><li>a new transaction `201`</li><li>both consumers `processed` +2 since folder 1</li></ul> |
+| 5. Clean up | registry back in step with the code | soft delete `200`, permanent delete `200`, version count as before |
+
+Then **re-run the Milestone 20 and 21 folders**; they now produce Avro
+through Kafka UI. Milestone 20 now expects 1 failed attempt (not 4) and 3 DLT
+copies; its new check 1.0 confirms the TransactionCreatedEvent subject exists
+(Kafka UI encodes with the subject's latest schema, so at least one
+transaction must have been published since the last `docker compose down`).
+
+**In Kafka UI**: Schema Registry lists the three subjects, with versions and
+schema text. Topics → `transaction-events` → Messages shows the values
+decoded as JSON. Topics → `transaction-events.DLT` → a Milestone 20 poison
+shows `kafka_dlt-exception-message: … Unknown magic byte!` and the original
+bytes.
+
+**Optional — watch the real producer get refused.** This changes code and
+rebuilds only transaction-service; the consumers keep their current images,
+as in a real rolling deploy.
+1. Run Postman 2.x first, so version 1 is registered.
+2. In `spendwise-events/src/main/avro/TransactionCreatedEvent.avsc` delete the
+   `currency` field. In `transaction-service/.../outbox/OutboxAvroMapper.java`
+   delete the `.setCurrency(e.currency())` line in `created(...)` only (the
+   reversed event's schema keeps its `currency`).
+3. Rebuild and restart, then create a transaction (any Postman 1.6):
+   ```bash
+   docker compose build transaction-service && docker compose up -d transaction-service
+   docker compose logs -f transaction-service | grep "not acknowledged"
+   ```
+   The POST still returns `201`; the business write doesn't depend on the
+   registry. Every second the relay logs `Outbox event … (TransactionCreatedEvent)
+   not acknowledged, will retry next poll: … SerializationException: Error
+   registering Avro schema … — root cause: … Schema being registered is
+   incompatible with an earlier schema for subject "transaction-events-com.spendwise.events.avro.TransactionCreatedEvent" … error code: 409`.
+   Nothing reaches the topic, and the consumers' counters don't move:
+   ```bash
+   docker exec -it spendwise-postgres psql -U spendwise -d transaction_db -c "SELECT count(*) FROM outbox_events WHERE processed_at IS NULL;"
+   ```
+4. Revert and rebuild. The stuck row is published on the next poll, and the
+   consumers process it.
+   ```bash
+   git checkout -- spendwise-events/src/main/avro/TransactionCreatedEvent.avsc \
+     transaction-service/src/main/java/com/spendwise/transactionservice/outbox/OutboxAvroMapper.java
+   docker compose build transaction-service && docker compose up -d transaction-service
+   ```
+   (This restores the two files from the merged Milestone 22 commit. Do the
+   lab only after merging, so no other uncommitted change is in them.)
+
+Next: Milestone 23 — CQRS & Materialized Read Views.
 
 ## API Versioning & Deprecation Policy
 

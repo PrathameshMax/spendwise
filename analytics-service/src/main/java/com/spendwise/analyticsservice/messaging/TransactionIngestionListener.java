@@ -1,10 +1,10 @@
 package com.spendwise.analyticsservice.messaging;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.spendwise.common.messaging.EventHeaders;
 import com.spendwise.common.messaging.EventIdentity;
 import com.spendwise.common.messaging.IdempotencyMetrics;
+import com.spendwise.events.avro.TransactionCreatedEvent;
+import com.spendwise.events.avro.TransactionReversedEvent;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.header.Header;
@@ -60,6 +60,10 @@ import java.time.YearMonth;
  * the partitions — and logged as a read-side retraction; subtracting it from
  * the projections is Milestone 23.
  *
+ * <p><b>Avro (Milestone 22).</b> Values arrive decoded as the generated
+ * classes from spendwise-events, and the listener switches on their type. A
+ * record that is not valid Avro is dead-lettered before it reaches this method.
+ *
  * <p>Any failure here — an unparseable payload, a timed-out ingest — is
  * rethrown to the platform's error handler (Milestone 20, spendwise-common):
  * retried 3 times, 1 s apart, then published to {@code transaction-events.DLT},
@@ -68,82 +72,65 @@ import java.time.YearMonth;
 @Component
 public class TransactionIngestionListener {
 
-    static final String CREATED_EVENT_TYPE = "TransactionCreatedEvent";
-    static final String REVERSED_EVENT_TYPE = "TransactionReversedEvent";
 
     private static final Logger log = LoggerFactory.getLogger(TransactionIngestionListener.class);
 
     private static final Duration INGEST_TIMEOUT = Duration.ofSeconds(10);
 
-    private final ObjectMapper objectMapper;
     private final TransactionIngestionService transactionIngestionService;
     private final MeterRegistry meterRegistry;
 
-    public TransactionIngestionListener(ObjectMapper objectMapper,
-                                        TransactionIngestionService transactionIngestionService,
+    public TransactionIngestionListener(TransactionIngestionService transactionIngestionService,
                                         MeterRegistry meterRegistry) {
-        this.objectMapper = objectMapper;
         this.transactionIngestionService = transactionIngestionService;
         this.meterRegistry = meterRegistry;
     }
 
     @KafkaListener(id = TransactionIngestionService.CONSUMER, idIsGroup = false,
             topics = "${spendwise.kafka.topics.transaction-events}")
-    public void onTransactionEvent(ConsumerRecord<String, String> record) {
-        String eventType = header(record, EventHeaders.EVENT_TYPE);
-        if (CREATED_EVENT_TYPE.equals(eventType)) {
-            onCreated(record, parse(record, TransactionCreatedEvent.class));
-        } else if (REVERSED_EVENT_TYPE.equals(eventType)) {
-            onReversed(record, parse(record, TransactionReversedEvent.class));
-        } else {
-            log.debug("Skipping {} at {}-{}@{}: not handled by this listener",
-                    eventType, record.topic(), record.partition(), record.offset());
+    public void onTransactionEvent(ConsumerRecord<String, Object> record) {
+        switch (record.value()) {
+            case TransactionCreatedEvent created -> onCreated(record, created);
+            case TransactionReversedEvent reversed -> onReversed(record, reversed);
+            case null, default -> log.debug("Skipping {} at {}-{}@{}: not handled by this listener",
+                    header(record, EventHeaders.EVENT_TYPE), record.topic(), record.partition(), record.offset());
         }
     }
 
-    private void onCreated(ConsumerRecord<String, String> record, TransactionCreatedEvent event) {
+    private void onCreated(ConsumerRecord<String, Object> record, TransactionCreatedEvent event) {
         EventIdentity eventIdentity = EventIdentity.of(record);
         Boolean firstDelivery = transactionIngestionService.ingest(eventIdentity, event).block(INGEST_TIMEOUT);
         boolean processed = Boolean.TRUE.equals(firstDelivery);
         IdempotencyMetrics.record(meterRegistry, TransactionIngestionService.CONSUMER, processed);
         if (processed) {
             log.info("Read-side ingest: user {}, month {}, category {}, {} {} {} (base amount {}), event {}, partition {} offset {}",
-                    event.userId(), YearMonth.from(event.transactionDate()), event.categoryId(), event.type(),
-                    event.amount(), event.currency(), event.baseCurrencyAmount(), eventIdentity,
-                    record.partition(), record.offset());
+                    event.getUserId(), YearMonth.from(event.getTransactionDate()), event.getCategoryId(),
+                    event.getType(), event.getAmount(), event.getCurrency(), event.getBaseCurrencyAmount(),
+                    eventIdentity, record.partition(), record.offset());
         } else {
             log.info("Duplicate delivery of event {} for transaction {} discarded (partition {} offset {})",
-                    eventIdentity, event.transactionId(), record.partition(), record.offset());
+                    eventIdentity, event.getTransactionId(), record.partition(), record.offset());
         }
     }
 
-    private void onReversed(ConsumerRecord<String, String> record, TransactionReversedEvent event) {
+    private void onReversed(ConsumerRecord<String, Object> record, TransactionReversedEvent event) {
         EventIdentity eventIdentity = EventIdentity.of(record);
         Boolean firstDelivery = transactionIngestionService.retract(eventIdentity, event).block(INGEST_TIMEOUT);
         boolean processed = Boolean.TRUE.equals(firstDelivery);
         IdempotencyMetrics.record(meterRegistry, TransactionIngestionService.CONSUMER, processed);
         if (processed) {
             log.info("Read-side retraction: transaction {} reversed by {} — user {}, month {}, category {}, {} {} {} (base amount {}) removed; reason: {}; event {}, partition {} offset {}",
-                    event.transactionId(), event.reversalTransactionId(), event.userId(),
-                    YearMonth.from(event.transactionDate()), event.categoryId(), event.type(), event.amount(),
-                    event.currency(), event.baseCurrencyAmount(), event.reason(), eventIdentity,
-                    record.partition(), record.offset());
+                    event.getTransactionId(), event.getReversalTransactionId(), event.getUserId(),
+                    YearMonth.from(event.getTransactionDate()), event.getCategoryId(), event.getType(),
+                    event.getAmount(), event.getCurrency(), event.getBaseCurrencyAmount(), event.getReason(),
+                    eventIdentity, record.partition(), record.offset());
         } else {
             log.info("Duplicate delivery of event {} for transaction {} discarded (partition {} offset {})",
-                    eventIdentity, event.transactionId(), record.partition(), record.offset());
+                    eventIdentity, event.getTransactionId(), record.partition(), record.offset());
         }
     }
 
-    private <T> T parse(ConsumerRecord<String, String> record, Class<T> type) {
-        try {
-            return objectMapper.readValue(record.value(), type);
-        } catch (JsonProcessingException ex) {
-            throw new IllegalArgumentException("Unparseable %s at %s-%d@%d"
-                    .formatted(type.getSimpleName(), record.topic(), record.partition(), record.offset()), ex);
-        }
-    }
-
-    private static String header(ConsumerRecord<String, String> record, String name) {
+    private static String header(ConsumerRecord<String, Object> record, String name) {
         Header header = record.headers().lastHeader(name);
         return header == null || header.value() == null ? null : new String(header.value(), StandardCharsets.UTF_8);
     }

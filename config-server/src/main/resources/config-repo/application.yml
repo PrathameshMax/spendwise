@@ -45,8 +45,24 @@ spring:
       # consumer service) sees events published before it existed.
       auto-offset-reset: earliest
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      # Milestone 22 — values are Avro (Confluent wire format: magic byte,
+      # 4-byte schema id, Avro binary). ErrorHandlingDeserializer wraps the
+      # Avro deserializer so a record that cannot be decoded (not Avro, unknown
+      # schema id, no generated class for its record type) is handed to the
+      # error handler as a DeserializationException — non-retryable, so it goes
+      # straight to <topic>.DLT with its original bytes — instead of failing
+      # inside poll() on every attempt and blocking the partition.
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
       properties:
+        spring.deserializer.value.delegate.class: io.confluent.kafka.serializers.KafkaAvroDeserializer
+        schema.registry.url: ${SCHEMA_REGISTRY_URL:http://localhost:8091}
+        # Return the generated class (com.spendwise.events.avro.*) instead of a
+        # GenericRecord. The writer's schema comes from the registry by the id
+        # in the record; the reader's schema is the class compiled into this
+        # service, and Avro resolves one into the other — which is exactly the
+        # compatibility the registry guarantees.
+        specific.avro.reader: true
+        value.subject.name.strategy: io.confluent.kafka.serializers.subject.TopicRecordNameStrategy
         # Incremental (cooperative) rebalancing: when a member joins or leaves,
         # only the partitions that must move are revoked; everyone else keeps
         # consuming through the rebalance. The eager default stops the whole
@@ -80,8 +96,25 @@ spring:
       # and producer-side retries can never write a record twice to the log.
       acks: all
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      # Milestone 22 — Avro instead of JSON strings. On the first send of each
+      # record type the serializer registers its schema (auto.register.schemas,
+      # default true) under the subject below and caches the returned id; the
+      # registry refuses a schema that is not compatible with the subject's
+      # history (FULL_TRANSITIVE, docker-compose.yml), and the send then fails
+      # with a SerializationException — the record never reaches the topic.
+      value-serializer: io.confluent.kafka.serializers.KafkaAvroSerializer
       properties:
+        schema.registry.url: ${SCHEMA_REGISTRY_URL:http://localhost:8091}
+        # Subject = <topic>-<record full name>, e.g.
+        # transaction-events-com.spendwise.events.avro.TransactionCreatedEvent.
+        # The default (TopicNameStrategy, <topic>-value) allows one record type
+        # per topic; transaction-events carries two (created and reversed),
+        # each evolving on its own compatibility track.
+        value.subject.name.strategy: io.confluent.kafka.serializers.subject.TopicRecordNameStrategy
+        # avro-maven-plugin's stringType=String adds "avro.java.string" to the
+        # generated schemas; strip it so the registered contract is plain Avro,
+        # identical to src/main/avro/*.avsc and readable by any language.
+        avro.remove.java.properties: true
         enable.idempotence: true
         max.in.flight.requests.per.connection: 5
         # Bounded so a publisher holding row locks or an open transaction can't

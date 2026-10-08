@@ -1,10 +1,9 @@
 package com.spendwise.budgetservice.messaging;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.spendwise.common.messaging.EventHeaders;
 import com.spendwise.common.messaging.EventIdentity;
 import com.spendwise.common.messaging.IdempotencyMetrics;
+import com.spendwise.events.avro.TransactionCreatedEvent;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -35,6 +34,10 @@ import java.nio.charset.StandardCharsets;
  * (applied, rejected, no_budget, not_expense, unattributable, duplicate) — the
  * saga's own measure of how often HARD caps actually trigger compensation.
  *
+ * <p><b>Avro (Milestone 22).</b> The value arrives decoded as the generated
+ * class; dispatch is on its type. A record that is not valid Avro is
+ * dead-lettered by the error handler before it reaches this method.
+ *
  * <p>Failures (an unparseable payload, an unacknowledged rejection publish)
  * are rethrown to the platform error handler: 3 retries, 1 s apart, then
  * {@code transaction-events.DLT} (Milestone 20).
@@ -42,32 +45,26 @@ import java.nio.charset.StandardCharsets;
 @Component
 public class TransactionSpendListener {
 
-    static final String HANDLED_EVENT_TYPE = "TransactionCreatedEvent";
     static final String DECISIONS_METRIC = "spendwise.saga.budget.decisions";
 
     private static final Logger log = LoggerFactory.getLogger(TransactionSpendListener.class);
 
-    private final ObjectMapper objectMapper;
     private final BudgetSpendService budgetSpendService;
     private final MeterRegistry meterRegistry;
 
-    public TransactionSpendListener(ObjectMapper objectMapper, BudgetSpendService budgetSpendService,
-                                    MeterRegistry meterRegistry) {
-        this.objectMapper = objectMapper;
+    public TransactionSpendListener(BudgetSpendService budgetSpendService, MeterRegistry meterRegistry) {
         this.budgetSpendService = budgetSpendService;
         this.meterRegistry = meterRegistry;
     }
 
     @KafkaListener(id = BudgetSpendService.CONSUMER, idIsGroup = false,
             topics = "${spendwise.kafka.topics.transaction-events}")
-    public void onTransactionEvent(ConsumerRecord<String, String> record) {
-        String eventType = header(record, EventHeaders.EVENT_TYPE);
-        if (!HANDLED_EVENT_TYPE.equals(eventType)) {
+    public void onTransactionEvent(ConsumerRecord<String, Object> record) {
+        if (!(record.value() instanceof TransactionCreatedEvent event)) {
             log.debug("Skipping {} at {}-{}@{}: not handled by this listener",
-                    eventType, record.topic(), record.partition(), record.offset());
+                    header(record, EventHeaders.EVENT_TYPE), record.topic(), record.partition(), record.offset());
             return;
         }
-        TransactionCreatedEvent event = parse(record);
         EventIdentity eventIdentity = EventIdentity.of(record);
         BudgetDecision decision = budgetSpendService.apply(eventIdentity, event);
         IdempotencyMetrics.record(meterRegistry, BudgetSpendService.CONSUMER, decision != BudgetDecision.DUPLICATE);
@@ -80,16 +77,7 @@ public class TransactionSpendListener {
                 decision.tag());
     }
 
-    private TransactionCreatedEvent parse(ConsumerRecord<String, String> record) {
-        try {
-            return objectMapper.readValue(record.value(), TransactionCreatedEvent.class);
-        } catch (JsonProcessingException ex) {
-            throw new IllegalArgumentException("Unparseable TransactionCreatedEvent at %s-%d@%d"
-                    .formatted(record.topic(), record.partition(), record.offset()), ex);
-        }
-    }
-
-    private static String header(ConsumerRecord<String, String> record, String name) {
+    private static String header(ConsumerRecord<String, Object> record, String name) {
         Header header = record.headers().lastHeader(name);
         return header == null || header.value() == null ? null : new String(header.value(), StandardCharsets.UTF_8);
     }

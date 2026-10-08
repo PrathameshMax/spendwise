@@ -1,6 +1,8 @@
 package com.spendwise.analyticsservice.messaging;
 
 import com.spendwise.common.messaging.EventIdentity;
+import com.spendwise.events.avro.TransactionCreatedEvent;
+import com.spendwise.events.avro.TransactionReversedEvent;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.reactive.TransactionalOperator;
 import reactor.core.publisher.Mono;

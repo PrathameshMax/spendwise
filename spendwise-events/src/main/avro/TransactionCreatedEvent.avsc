@@ -1,0 +1,18 @@
+{
+  "type": "record",
+  "name": "TransactionCreatedEvent",
+  "namespace": "com.spendwise.events.avro",
+  "doc": "A ledger entry was recorded (Functional Roadmap, Workflow 1). Published by transaction-service's outbox relay to transaction-events, keyed by transactionId.",
+  "fields": [
+    {"name": "transactionId", "type": "string", "doc": "UUID of the ledger entry."},
+    {"name": "userId", "type": "string", "doc": "UUID of the owning user."},
+    {"name": "categoryId", "type": "string", "doc": "UUID of the category in transaction_db."},
+    {"name": "categoryName", "type": ["null", "string"], "default": null, "doc": "Category name, which budgets match on. Null only for events recorded before Milestone 21."},
+    {"name": "amount", "type": {"type": "bytes", "logicalType": "decimal", "precision": 19, "scale": 2}, "doc": "Amount as entered, in currency."},
+    {"name": "type", "type": "string", "doc": "INCOME or EXPENSE. A string, not an Avro enum: a new value must not make every existing reader fail."},
+    {"name": "transactionDate", "type": {"type": "int", "logicalType": "date"}, "doc": "Business date of the entry."},
+    {"name": "currency", "type": "string", "doc": "ISO 4217 code of amount."},
+    {"name": "baseCurrencyAmount", "type": ["null", {"type": "bytes", "logicalType": "decimal", "precision": 19, "scale": 2}], "default": null, "doc": "Amount converted to the user's base currency; null when no conversion was needed."},
+    {"name": "createdAt", "type": {"type": "long", "logicalType": "timestamp-millis"}, "doc": "When the entry was recorded."}
+  ]
+}

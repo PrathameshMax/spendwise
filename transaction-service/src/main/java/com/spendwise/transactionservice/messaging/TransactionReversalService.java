@@ -2,6 +2,7 @@ package com.spendwise.transactionservice.messaging;
 
 import com.spendwise.common.messaging.EventIdentity;
 import com.spendwise.common.messaging.JdbcProcessedEventGuard;
+import com.spendwise.events.avro.TransactionRejectedEvent;
 import com.spendwise.transactionservice.domain.Transaction;
 import com.spendwise.transactionservice.domain.TransactionRepository;
 import com.spendwise.transactionservice.event.TransactionReversedEvent;
@@ -13,6 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * Milestone 21 — the compensating transaction of the budget-breach saga
@@ -38,6 +40,10 @@ import java.util.Optional;
  * message id); and the V6 migration's unique index on
  * {@code reverses_transaction_id} makes a second reversing entry impossible
  * at the database.
+ *
+ * <p>Milestone 22 — the event is budget-service's Avro
+ * {@code TransactionRejectedEvent} (spendwise-events), decoded by
+ * {@code KafkaAvroDeserializer}; ids travel as strings and are parsed here.
  *
  * <p>The original entry is loaded with a plain {@code findById}: there is one
  * consumer thread per instance, events about one transaction share a
@@ -65,16 +71,17 @@ public class TransactionReversalService {
 
     @Transactional
     public ReversalOutcome reverse(EventIdentity eventIdentity, TransactionRejectedEvent event) {
+        UUID transactionId = UUID.fromString(event.getTransactionId());
+        UUID userId = UUID.fromString(event.getUserId());
         if (!processedEventGuard.claim(CONSUMER, eventIdentity)) {
-            log.info("Duplicate delivery of event {} for transaction {} discarded",
-                    eventIdentity, event.transactionId());
+            log.info("Duplicate delivery of event {} for transaction {} discarded", eventIdentity, transactionId);
             return ReversalOutcome.DUPLICATE;
         }
-        Optional<Transaction> found = transactionRepository.findById(event.transactionId())
-                .filter(transaction -> transaction.getUserId().equals(event.userId()));
+        Optional<Transaction> found = transactionRepository.findById(transactionId)
+                .filter(transaction -> transaction.getUserId().equals(userId));
         if (found.isEmpty()) {
             log.warn("Rejection {} names transaction {} for user {}, which does not exist; nothing to reverse",
-                    eventIdentity, event.transactionId(), event.userId());
+                    eventIdentity, transactionId, userId);
             return ReversalOutcome.UNKNOWN_TRANSACTION;
         }
         Transaction original = found.get();
@@ -84,8 +91,8 @@ public class TransactionReversalService {
             return ReversalOutcome.ALREADY_REVERSED;
         }
 
-        original.markReversed(event.reason());
-        Transaction reversal = transactionRepository.save(Transaction.reversalOf(original, event.reason()));
+        original.markReversed(event.getReason());
+        Transaction reversal = transactionRepository.save(Transaction.reversalOf(original, event.getReason()));
 
         outboxEventRecorder.record(original.getId(), new TransactionReversedEvent(
                 original.getId(),
@@ -98,11 +105,11 @@ public class TransactionReversalService {
                 original.getTransactionDate(),
                 original.getCurrency(),
                 original.getBaseCurrencyAmount(),
-                event.reason(),
+                event.getReason(),
                 Instant.now()));
 
         log.info("Transaction {} reversed by entry {} ({} {}): {}", original.getId(), reversal.getId(),
-                reversal.getAmount(), reversal.getCurrency(), event.reason());
+                reversal.getAmount(), reversal.getCurrency(), event.getReason());
         return ReversalOutcome.REVERSED;
     }
 }

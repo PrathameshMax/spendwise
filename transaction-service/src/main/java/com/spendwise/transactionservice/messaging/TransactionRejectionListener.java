@@ -1,10 +1,9 @@
 package com.spendwise.transactionservice.messaging;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.spendwise.common.messaging.EventHeaders;
 import com.spendwise.common.messaging.EventIdentity;
 import com.spendwise.common.messaging.IdempotencyMetrics;
+import com.spendwise.events.avro.TransactionRejectedEvent;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -28,6 +27,13 @@ import java.nio.charset.StandardCharsets;
  * service calls the other, and either can be down while the other keeps
  * working; the saga simply completes later (Q62, Q63).
  *
+ * <p><b>Avro (Milestone 22).</b> The value arrives already decoded: the
+ * generated {@code TransactionRejectedEvent}, resolved from the writer's
+ * registered schema into the version compiled into this service. Dispatch is
+ * on the decoded type (Java 21 pattern matching), so the {@code eventType}
+ * header is now informational; a record that is not valid Avro never reaches
+ * this method — it is dead-lettered by the error handler.
+ *
  * <p>Outcomes are counted under the shared
  * {@code spendwise.kafka.events.idempotency} and under
  * {@code spendwise.saga.reversals{outcome}} (reversed, already_reversed,
@@ -38,33 +44,27 @@ import java.nio.charset.StandardCharsets;
 @Component
 public class TransactionRejectionListener {
 
-    static final String HANDLED_EVENT_TYPE = "TransactionRejectedEvent";
     static final String REVERSALS_METRIC = "spendwise.saga.reversals";
 
     private static final Logger log = LoggerFactory.getLogger(TransactionRejectionListener.class);
 
-    private final ObjectMapper objectMapper;
     private final TransactionReversalService transactionReversalService;
     private final MeterRegistry meterRegistry;
 
-    public TransactionRejectionListener(ObjectMapper objectMapper,
-                                        TransactionReversalService transactionReversalService,
+    public TransactionRejectionListener(TransactionReversalService transactionReversalService,
                                         MeterRegistry meterRegistry) {
-        this.objectMapper = objectMapper;
         this.transactionReversalService = transactionReversalService;
         this.meterRegistry = meterRegistry;
     }
 
     @KafkaListener(id = TransactionReversalService.CONSUMER, idIsGroup = false,
             topics = "${spendwise.kafka.topics.budget-events}")
-    public void onBudgetEvent(ConsumerRecord<String, String> record) {
-        String eventType = header(record, EventHeaders.EVENT_TYPE);
-        if (!HANDLED_EVENT_TYPE.equals(eventType)) {
+    public void onBudgetEvent(ConsumerRecord<String, Object> record) {
+        if (!(record.value() instanceof TransactionRejectedEvent event)) {
             log.debug("Skipping {} at {}-{}@{}: not handled by this listener",
-                    eventType, record.topic(), record.partition(), record.offset());
+                    header(record, EventHeaders.EVENT_TYPE), record.topic(), record.partition(), record.offset());
             return;
         }
-        TransactionRejectedEvent event = parse(record);
         EventIdentity eventIdentity = EventIdentity.of(record);
         ReversalOutcome outcome = transactionReversalService.reverse(eventIdentity, event);
         IdempotencyMetrics.record(meterRegistry, TransactionReversalService.CONSUMER,
@@ -78,16 +78,7 @@ public class TransactionRejectionListener {
                 outcome.tag());
     }
 
-    private TransactionRejectedEvent parse(ConsumerRecord<String, String> record) {
-        try {
-            return objectMapper.readValue(record.value(), TransactionRejectedEvent.class);
-        } catch (JsonProcessingException ex) {
-            throw new IllegalArgumentException("Unparseable TransactionRejectedEvent at %s-%d@%d"
-                    .formatted(record.topic(), record.partition(), record.offset()), ex);
-        }
-    }
-
-    private static String header(ConsumerRecord<String, String> record, String name) {
+    private static String header(ConsumerRecord<String, Object> record, String name) {
         Header header = record.headers().lastHeader(name);
         return header == null || header.value() == null ? null : new String(header.value(), StandardCharsets.UTF_8);
     }

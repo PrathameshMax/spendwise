@@ -160,6 +160,54 @@ services:
     restart: unless-stopped
     deploy: *kafka-deploy
 
+  # Milestone 22 — Confluent Schema Registry: the store of every Avro contract
+  # (one subject per topic and record type, TopicRecordNameStrategy) and the
+  # gate that refuses an incompatible new version. Stateless itself: schemas
+  # are kept in the compacted _schemas topic on the Kafka cluster, which it
+  # creates (replication factor 3) on first start, so it survives restarts
+  # but, like every topic here, not `docker compose down`. Producers then
+  # re-register their schemas on their next send.
+  # Same release as the client serializers (confluent.version in pom.xml),
+  # Confluent Platform 7.9 = Apache Kafka 3.9, the brokers' version.
+  # SCHEMA_COMPATIBILITY_LEVEL is the global default for every subject:
+  # FULL_TRANSITIVE — a new version must be readable by every older reader
+  # (forward) and able to read every older version (backward), not just the
+  # previous one; Milestone 23 replays topics from offset 0, so every
+  # historical version stays live. Loopback-only port, no auth: local dev tool.
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.9.8
+    container_name: spendwise-schema-registry
+    hostname: schema-registry
+    ports:
+      - "127.0.0.1:8091:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: PLAINTEXT://kafka-1:19092,PLAINTEXT://kafka-2:19092,PLAINTEXT://kafka-3:19092
+      SCHEMA_REGISTRY_KAFKASTORE_TOPIC: _schemas
+      SCHEMA_REGISTRY_KAFKASTORE_TOPIC_REPLICATION_FACTOR: 3
+      SCHEMA_REGISTRY_SCHEMA_COMPATIBILITY_LEVEL: FULL_TRANSITIVE
+      SCHEMA_REGISTRY_HEAP_OPTS: -Xms128m -Xmx256m
+    depends_on:
+      kafka-1:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8081/subjects > /dev/null"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 10
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
   # Milestone 17 — browser UI over the cluster (topics, partitions, messages
   # with their headers, consumer groups), used by the Postman validation plan
   # in place of Kafka CLI commands. Behind the "tools" profile, so a plain
@@ -178,11 +226,17 @@ services:
       # Milestone 20 — bound to loopback: the UI is writable and has no auth,
       # so it must not be reachable from other machines on the network.
       - "127.0.0.1:8090:8080"
+    # Milestone 22 — cluster settings moved from KAFKA_CLUSTERS_0_* variables
+    # into infra/kafka-ui/config.yml, which adds the Schema Registry and two
+    # named Avro serdes. Spring Boot binds an indexed list from a single
+    # source, so cluster 0 must be defined in one place: the file.
     environment:
-      KAFKA_CLUSTERS_0_NAME: spendwise
-      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka-1:19092,kafka-2:19092,kafka-3:19092
-      KAFKA_CLUSTERS_0_READONLY: "false"
+      SPRING_CONFIG_ADDITIONAL-LOCATION: /etc/kafkaui/config.yml
+    volumes:
+      - ./infra/kafka-ui/config.yml:/etc/kafkaui/config.yml:ro
     depends_on:
+      schema-registry:
+        condition: service_healthy
       kafka-1:
         condition: service_healthy
       kafka-2:
@@ -358,6 +412,15 @@ services:
       # Milestone 17 — in-network listeners of all three brokers (any one is
       # enough to bootstrap; listing all three survives one being down).
       KAFKA_BOOTSTRAP_SERVERS: kafka-1:19092,kafka-2:19092,kafka-3:19092
+      # Milestone 22 — Avro serializers/deserializers resolve schemas here.
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      # Deliberately no depends_on schema-registry: the registry waits for a
+      # healthy Kafka, and this service must start (and serve its API) while
+      # Kafka is down. Until the registry answers, its Kafka work waits rather
+      # than failing: publishing is retried (outbox relay every poll; a budget
+      # decision rolls back and is redelivered), and a consumed record whose
+      # schema cannot be fetched is retried every 5 s, not dead-lettered
+      # (spendwise-common's DeserializationFailureBackOff).
     depends_on:
       config-server:
         condition: service_healthy
@@ -409,6 +472,15 @@ services:
       # Milestone 21 — budget-service consumes transaction-events and publishes
       # budget-events (the budget-breach saga).
       KAFKA_BOOTSTRAP_SERVERS: kafka-1:19092,kafka-2:19092,kafka-3:19092
+      # Milestone 22 — Avro serializers/deserializers resolve schemas here.
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      # Deliberately no depends_on schema-registry: the registry waits for a
+      # healthy Kafka, and this service must start (and serve its API) while
+      # Kafka is down. Until the registry answers, its Kafka work waits rather
+      # than failing: publishing is retried (outbox relay every poll; a budget
+      # decision rolls back and is redelivered), and a consumed record whose
+      # schema cannot be fetched is retried every 5 s, not dead-lettered
+      # (spendwise-common's DeserializationFailureBackOff).
     depends_on:
       config-server:
         condition: service_healthy
@@ -460,12 +532,20 @@ services:
       EUREKA_HOST: discovery-server
       MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
       KAFKA_BOOTSTRAP_SERVERS: kafka-1:19092,kafka-2:19092,kafka-3:19092
+      # Milestone 22 — Avro serializers/deserializers resolve schemas here.
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
       # Overrides the Dockerfile's MaxRAMPercentage=75 (set at Milestone 18,
       # when this container's limit was 384M). Kept at 60% with the 512M limit
       # so ~200M stays outside the heap for metaspace (Hibernate's classes
       # included), threads and buffers.
       JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=60.0 -XX:+ExitOnOutOfMemoryError"
     depends_on:
+      # Milestone 22 — service_healthy: a consumer that meets a schema id it
+      # has not cached yet must fetch it. An unreachable registry would only
+      # stall the partition (retried every 5 s), but there is no reason to
+      # start consuming before it is up.
+      schema-registry:
+        condition: service_healthy
       config-server:
         condition: service_healthy
       postgres-db-init:
@@ -512,7 +592,15 @@ services:
       # Milestone 18 — in-network listeners of the three brokers, for this
       # service's own consumer group on transaction-events.
       KAFKA_BOOTSTRAP_SERVERS: kafka-1:19092,kafka-2:19092,kafka-3:19092
+      # Milestone 22 — Avro serializers/deserializers resolve schemas here.
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
     depends_on:
+      # Milestone 22 — service_healthy: a consumer that meets a schema id it
+      # has not cached yet must fetch it. An unreachable registry would only
+      # stall the partition (retried every 5 s), but there is no reason to
+      # start consuming before it is up.
+      schema-registry:
+        condition: service_healthy
       config-server:
         condition: service_healthy
       postgres-db-init:

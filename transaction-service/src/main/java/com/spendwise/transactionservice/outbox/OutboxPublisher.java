@@ -76,6 +76,17 @@ import java.util.concurrent.TimeoutException;
  * dead-lettered records wait for a human, who needs time to diagnose and
  * replay them.
  *
+ * <p><b>Avro on the wire (Milestone 22).</b> Each row's JSON payload is
+ * converted to its Avro contract by {@link OutboxAvroMapper} and serialized by
+ * {@code KafkaAvroSerializer}, which registers the record's schema in the
+ * Schema Registry on first use. A schema the registry refuses as incompatible
+ * makes {@code send} throw a {@code SerializationException} (HTTP 409 from the
+ * registry); that is handled like any failed publish: the batch stops, the
+ * row stays unprocessed, and the relay retries it every poll. A breaking
+ * schema change therefore stalls delivery visibly instead of corrupting the
+ * topic — and the event is published as soon as a compatible release is
+ * deployed.
+ *
  * <p><b>Topic provisioning is lazy, not a startup dependency.</b> The topic
  * is created (or its partition count raised) on the first poll that can
  * reach the cluster, not at application start. transaction-service must keep
@@ -90,8 +101,9 @@ public class OutboxPublisher {
     private static final Logger log = LoggerFactory.getLogger(OutboxPublisher.class);
 
     private final OutboxEventRepository outboxEventRepository;
-    private final KafkaTemplate<String, String> kafkaTemplate;
+    private final KafkaTemplate<String, Object> kafkaTemplate;
     private final KafkaAdmin kafkaAdmin;
+    private final OutboxAvroMapper outboxAvroMapper;
     private final TransactionTemplate transactionTemplate;
     private final OutboxPublisherProperties properties;
     private final NewTopic topic;
@@ -100,13 +112,15 @@ public class OutboxPublisher {
     private volatile boolean topicReady;
 
     public OutboxPublisher(OutboxEventRepository outboxEventRepository,
-                           KafkaTemplate<String, String> kafkaTemplate,
+                           KafkaTemplate<String, Object> kafkaTemplate,
                            KafkaAdmin kafkaAdmin,
+                           OutboxAvroMapper outboxAvroMapper,
                            TransactionTemplate transactionTemplate,
                            OutboxPublisherProperties properties) {
         this.outboxEventRepository = outboxEventRepository;
         this.kafkaTemplate = kafkaTemplate;
         this.kafkaAdmin = kafkaAdmin;
+        this.outboxAvroMapper = outboxAvroMapper;
         this.transactionTemplate = transactionTemplate;
         this.properties = properties;
         this.topic = TopicBuilder.name(properties.topic())
@@ -166,13 +180,13 @@ public class OutboxPublisher {
     }
 
     private boolean publishOne(OutboxEvent event) {
-        ProducerRecord<String, String> record = toRecord(event);
         String correlationId = event.getCorrelationId();
         if (correlationId != null) {
             MDC.put(CorrelationIdConstants.MDC_KEY, correlationId);
         }
         try {
-            SendResult<String, String> result = kafkaTemplate.send(record)
+            ProducerRecord<String, Object> record = toRecord(event);
+            SendResult<String, Object> result = kafkaTemplate.send(record)
                     .get(properties.sendTimeout().toMillis(), TimeUnit.MILLISECONDS);
             log.debug("Outbox event {} acknowledged at {}-{}@{}", event.getId(),
                     result.getRecordMetadata().topic(), result.getRecordMetadata().partition(),
@@ -184,17 +198,25 @@ public class OutboxPublisher {
             return false;
         } catch (ExecutionException | TimeoutException | RuntimeException ex) {
             Throwable cause = ex instanceof ExecutionException && ex.getCause() != null ? ex.getCause() : ex;
-            log.warn("Outbox event {} not acknowledged, will retry next poll: {}",
-                    event.getId(), cause.toString());
+            Throwable root = cause;
+            while (root.getCause() != null && root.getCause() != root) {
+                root = root.getCause();
+            }
+            // Milestone 22 — the root cause is where the Schema Registry's
+            // answer is (e.g. "Schema being registered is incompatible with an
+            // earlier schema for subject ...; error code: 409").
+            log.warn("Outbox event {} ({}) not acknowledged, will retry next poll: {}{}",
+                    event.getId(), event.getEventType(), cause,
+                    root == cause ? "" : " — root cause: " + root);
             return false;
         } finally {
             MDC.remove(CorrelationIdConstants.MDC_KEY);
         }
     }
 
-    private ProducerRecord<String, String> toRecord(OutboxEvent event) {
-        ProducerRecord<String, String> record = new ProducerRecord<>(
-                properties.topic(), event.getAggregateId().toString(), event.getPayload());
+    private ProducerRecord<String, Object> toRecord(OutboxEvent event) {
+        ProducerRecord<String, Object> record = new ProducerRecord<>(
+                properties.topic(), event.getAggregateId().toString(), outboxAvroMapper.toAvro(event));
         record.headers().add(EventHeaders.OUTBOX_EVENT_ID, utf8(event.getId().toString()));
         record.headers().add(EventHeaders.EVENT_TYPE, utf8(event.getEventType()));
         record.headers().add(EventHeaders.AGGREGATE_TYPE, utf8(event.getAggregateType()));

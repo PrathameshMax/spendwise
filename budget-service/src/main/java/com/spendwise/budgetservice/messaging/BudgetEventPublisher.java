@@ -1,10 +1,9 @@
 package com.spendwise.budgetservice.messaging;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.spendwise.common.messaging.DeadLetterTopics;
 import com.spendwise.common.messaging.EventHeaders;
 import com.spendwise.common.tracing.CorrelationIdConstants;
+import com.spendwise.events.avro.TransactionRejectedEvent;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.config.TopicConfig;
@@ -51,6 +50,14 @@ import java.util.concurrent.TimeoutException;
  * {@code EventIdentity} reads it unchanged: it is the event's identity,
  * whichever mechanism produced it.
  *
+ * <p><b>Avro (Milestone 22).</b> The event is the generated
+ * {@code TransactionRejectedEvent} (spendwise-events), serialized by
+ * {@code KafkaAvroSerializer}, which registers its schema under
+ * {@code budget-events-com.spendwise.events.avro.TransactionRejectedEvent} on
+ * first use. A registry that is down or refuses the schema makes the send
+ * throw, which — like an unacknowledged send — rolls the decision back for
+ * redelivery.
+ *
  * <p><b>Topic provisioning is best-effort at startup, guaranteed at first
  * publish.</b> budget-service owns {@code budget-events} and
  * {@code budget-events.DLT} (brokers do not auto-create topics). It tries to
@@ -68,20 +75,18 @@ public class BudgetEventPublisher {
 
     private static final Logger log = LoggerFactory.getLogger(BudgetEventPublisher.class);
 
-    private final KafkaTemplate<String, String> kafkaTemplate;
+    private final KafkaTemplate<String, Object> kafkaTemplate;
     private final KafkaAdmin kafkaAdmin;
-    private final ObjectMapper objectMapper;
     private final BudgetEventsProperties properties;
     private final NewTopic topic;
     private final NewTopic deadLetterTopic;
 
     private volatile boolean topicReady;
 
-    public BudgetEventPublisher(KafkaTemplate<String, String> kafkaTemplate, KafkaAdmin kafkaAdmin,
-                                ObjectMapper objectMapper, BudgetEventsProperties properties) {
+    public BudgetEventPublisher(KafkaTemplate<String, Object> kafkaTemplate, KafkaAdmin kafkaAdmin,
+                                BudgetEventsProperties properties) {
         this.kafkaTemplate = kafkaTemplate;
         this.kafkaAdmin = kafkaAdmin;
-        this.objectMapper = objectMapper;
         this.properties = properties;
         this.topic = TopicBuilder.name(properties.topic())
                 .partitions(properties.partitions())
@@ -113,9 +118,9 @@ public class BudgetEventPublisher {
      */
     public UUID publishRejection(TransactionRejectedEvent event) {
         ensureTopic();
-        UUID eventId = rejectionEventId(event.transactionId());
-        ProducerRecord<String, String> record = new ProducerRecord<>(
-                properties.topic(), event.transactionId().toString(), toJson(event));
+        UUID eventId = rejectionEventId(UUID.fromString(event.getTransactionId()));
+        ProducerRecord<String, Object> record = new ProducerRecord<>(
+                properties.topic(), event.getTransactionId(), event);
         record.headers().add(EventHeaders.OUTBOX_EVENT_ID, utf8(eventId.toString()));
         record.headers().add(EventHeaders.EVENT_TYPE, utf8(TransactionRejectedEvent.class.getSimpleName()));
         record.headers().add(EventHeaders.AGGREGATE_TYPE, utf8(AGGREGATE_TYPE));
@@ -124,10 +129,10 @@ public class BudgetEventPublisher {
             record.headers().add(CorrelationIdConstants.HEADER_NAME, utf8(correlationId));
         }
         try {
-            SendResult<String, String> result = kafkaTemplate.send(record)
+            SendResult<String, Object> result = kafkaTemplate.send(record)
                     .get(properties.sendTimeout().toMillis(), TimeUnit.MILLISECONDS);
             log.info("TransactionRejectedEvent {} for transaction {} acknowledged at {}-{}@{}", eventId,
-                    event.transactionId(), result.getRecordMetadata().topic(),
+                    event.getTransactionId(), result.getRecordMetadata().topic(),
                     result.getRecordMetadata().partition(), result.getRecordMetadata().offset());
             return eventId;
         } catch (InterruptedException ex) {
@@ -136,7 +141,7 @@ public class BudgetEventPublisher {
         } catch (ExecutionException | TimeoutException ex) {
             Throwable cause = ex instanceof ExecutionException && ex.getCause() != null ? ex.getCause() : ex;
             throw new IllegalStateException("TransactionRejectedEvent %s for transaction %s not acknowledged"
-                    .formatted(eventId, event.transactionId()), cause);
+                    .formatted(eventId, event.getTransactionId()), cause);
         }
     }
 
@@ -159,14 +164,6 @@ public class BudgetEventPublisher {
         log.info("Topics {} and {} ready ({} partitions, replication factor {}, min.insync.replicas {})",
                 properties.topic(), deadLetterTopic.name(), properties.partitions(),
                 properties.replicationFactor(), properties.minInSyncReplicas());
-    }
-
-    private String toJson(TransactionRejectedEvent event) {
-        try {
-            return objectMapper.writeValueAsString(event);
-        } catch (JsonProcessingException ex) {
-            throw new IllegalStateException("Cannot serialize " + event, ex);
-        }
     }
 
     private static byte[] utf8(String value) {

@@ -13,6 +13,7 @@
 
     <modules>
         <module>spendwise-common</module>
+        <module>spendwise-events</module>
         <module>discovery-server</module>
         <module>config-server</module>
         <module>auth-service</module>
@@ -77,7 +78,31 @@
              resolves; a plugin that sets argLine itself (e.g. a JaCoCo agent,
              if one is added later) is appended to, not overwritten. -->
         <argLine></argLine>
+        <!-- Milestone 22 — Avro contracts and the Confluent Schema Registry serdes.
+             Neither is in the Boot or Cloud BOM. Confluent Platform 7.9.x is the
+             line built on Apache Kafka 3.9 (the brokers' version); 7.9.8 is both
+             the serializer version here and the cp-schema-registry image tag in
+             docker-compose.yml, so client and server are one release. avro 1.11.5
+             is the version Confluent 7.9.8 itself builds against (confluentinc/
+             common v7.9.8 pom.xml, avro.version), and avro-maven-plugin must
+             match the avro runtime that reads the classes it generates.
+             kafka-avro-serializer declares Kafka itself as "provided", so the
+             kafka-clients version stays the one Spring Boot manages. -->
+        <spendwise-events.version>1.0.0-SNAPSHOT</spendwise-events.version>
+        <confluent.version>7.9.8</confluent.version>
+        <avro.version>1.11.5</avro.version>
     </properties>
+
+    <!-- Milestone 22 — Confluent's serializers are published to Confluent's own
+         Maven repository, not to Maven Central. Declared once here; every other
+         artifact still resolves from Central first. -->
+    <repositories>
+        <repository>
+            <id>confluent</id>
+            <name>Confluent</name>
+            <url>https://packages.confluent.io/maven/</url>
+        </repository>
+    </repositories>
 
     <dependencyManagement>
         <dependencies>
@@ -99,6 +124,21 @@
                 <groupId>com.spendwise</groupId>
                 <artifactId>spendwise-common</artifactId>
                 <version>${spendwise-common.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.spendwise</groupId>
+                <artifactId>spendwise-events</artifactId>
+                <version>${spendwise-events.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.avro</groupId>
+                <artifactId>avro</artifactId>
+                <version>${avro.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.confluent</groupId>
+                <artifactId>kafka-avro-serializer</artifactId>
+                <version>${confluent.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.springdoc</groupId>
@@ -174,6 +214,11 @@
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-dependency-plugin</artifactId>
                     <version>${maven-dependency-plugin.version}</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.avro</groupId>
+                    <artifactId>avro-maven-plugin</artifactId>
+                    <version>${avro.version}</version>
                 </plugin>
             </plugins>
         </pluginManagement>

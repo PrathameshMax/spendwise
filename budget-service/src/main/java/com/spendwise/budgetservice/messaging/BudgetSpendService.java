@@ -4,6 +4,8 @@ import com.spendwise.budgetservice.domain.Budget;
 import com.spendwise.budgetservice.domain.BudgetRepository;
 import com.spendwise.common.messaging.EventIdentity;
 import com.spendwise.common.messaging.JdbcProcessedEventGuard;
+import com.spendwise.events.avro.TransactionCreatedEvent;
+import com.spendwise.events.avro.TransactionRejectedEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -13,6 +15,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.YearMonth;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * Milestone 21 — the budget step of the Choreographed SAGA (Functional
@@ -59,6 +62,9 @@ import java.util.Optional;
  * increased by this consumer, the window is a commit failure in the
  * milliseconds after an acknowledged send.
  *
+ * <p>Milestone 22 — reads the Avro {@code TransactionCreatedEvent} and
+ * publishes the Avro {@code TransactionRejectedEvent} (spendwise-events).
+ *
  * <p>Budgets are matched on the exact category name, case-sensitively, as
  * stored by transaction-service.
  */
@@ -66,6 +72,7 @@ import java.util.Optional;
 public class BudgetSpendService {
 
     static final String CONSUMER = "budget-spend";
+    private static final String EXPENSE = "EXPENSE";
 
     private static final Logger log = LoggerFactory.getLogger(BudgetSpendService.class);
 
@@ -84,42 +91,53 @@ public class BudgetSpendService {
     public BudgetDecision apply(EventIdentity eventIdentity, TransactionCreatedEvent event) {
         if (!processedEventGuard.claim(CONSUMER, eventIdentity)) {
             log.info("Duplicate delivery of event {} for transaction {} discarded",
-                    eventIdentity, event.transactionId());
+                    eventIdentity, event.getTransactionId());
             return BudgetDecision.DUPLICATE;
         }
-        if (!TransactionCreatedEvent.EXPENSE.equals(event.type())) {
+        if (!EXPENSE.equals(event.getType())) {
             return BudgetDecision.NOT_EXPENSE;
         }
-        if (event.categoryName() == null) {
+        if (event.getCategoryName() == null) {
             log.info("Transaction {} has no category name (event predates Milestone 21); not attributed to a budget",
-                    event.transactionId());
+                    event.getTransactionId());
             return BudgetDecision.UNATTRIBUTABLE;
         }
-        YearMonth periodMonth = YearMonth.from(event.transactionDate());
+        UUID userId = UUID.fromString(event.getUserId());
+        YearMonth periodMonth = YearMonth.from(event.getTransactionDate());
         Optional<Budget> match = budgetRepository.findByUserIdAndCategoryAndPeriodMonth(
-                event.userId(), event.categoryName(), periodMonth);
+                userId, event.getCategoryName(), periodMonth);
         if (match.isEmpty()) {
             log.debug("No budget for user {}, category {}, month {}; transaction {} not enforced",
-                    event.userId(), event.categoryName(), periodMonth, event.transactionId());
+                    userId, event.getCategoryName(), periodMonth, event.getTransactionId());
             return BudgetDecision.NO_BUDGET;
         }
         Budget budget = match.get();
-        BigDecimal expense = event.budgetAmount();
+        // The amount that counts against a budget: the base-currency figure if converted.
+        BigDecimal expense = event.getBaseCurrencyAmount() != null ? event.getBaseCurrencyAmount() : event.getAmount();
 
         if (budget.wouldBreachHardCap(expense)) {
             BigDecimal wouldBe = budget.getCurrentSpend().add(expense);
             String reason = "HARD budget '%s' for %s: cap %s, spent %s, this expense of %s would make it %s"
                     .formatted(budget.getCategory(), periodMonth, budget.getCappedAmount(),
                             budget.getCurrentSpend(), expense, wouldBe);
-            budgetEventPublisher.publishRejection(new TransactionRejectedEvent(
-                    event.transactionId(), event.userId(), budget.getId(), budget.getCategory(), periodMonth,
-                    budget.getCappedAmount(), budget.getCurrentSpend(), expense, reason, Instant.now()));
-            log.info("Transaction {} rejected: {}", event.transactionId(), reason);
+            budgetEventPublisher.publishRejection(TransactionRejectedEvent.newBuilder()
+                    .setTransactionId(event.getTransactionId())
+                    .setUserId(event.getUserId())
+                    .setBudgetId(budget.getId().toString())
+                    .setCategory(budget.getCategory())
+                    .setPeriodMonth(periodMonth.toString())
+                    .setCappedAmount(budget.getCappedAmount())
+                    .setCurrentSpend(budget.getCurrentSpend())
+                    .setAttemptedAmount(expense)
+                    .setReason(reason)
+                    .setRejectedAt(Instant.now())
+                    .build());
+            log.info("Transaction {} rejected: {}", event.getTransactionId(), reason);
             return BudgetDecision.REJECTED;
         }
 
         budget.applySpend(expense);
-        log.info("Transaction {} applied to budget {} ({} {}): spend now {} of {}", event.transactionId(),
+        log.info("Transaction {} applied to budget {} ({} {}): spend now {} of {}", event.getTransactionId(),
                 budget.getId(), budget.getCategory(), periodMonth, budget.getCurrentSpend(),
                 budget.getCappedAmount());
         return BudgetDecision.APPLIED;

@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.spendwise</groupId>
+        <artifactId>spendwise-parent</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>spendwise-events</artifactId>
+    <packaging>jar</packaging>
+    <name>SpendWise :: Events</name>
+    <description>Milestone 22 — the Avro contracts of every Kafka event on the platform
+        (src/main/avro/*.avsc) and the Java classes generated from them. Producers
+        serialize these classes and register their schemas in the Schema Registry;
+        consumers read them back as the same classes (specific.avro.reader).</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.apache.avro</groupId>
+            <artifactId>avro</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- Generates one SpecificRecord class per .avsc into
+                 target/generated-sources/avro and adds it to the compile path.
+                 - stringType String: java.lang.String fields instead of Avro's Utf8/CharSequence.
+                 - enableDecimalLogicalType: decimal(19,2) fields become BigDecimal (with the
+                   DecimalConversion registered on each class's SpecificData model), matching
+                   NUMERIC(19,2) in the databases. date and timestamp-millis map to
+                   LocalDate and Instant by default. -->
+            <plugin>
+                <groupId>org.apache.avro</groupId>
+                <artifactId>avro-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>schema</goal>
+                        </goals>
+                        <configuration>
+                            <sourceDirectory>${project.basedir}/src/main/avro</sourceDirectory>
+                            <outputDirectory>${project.build.directory}/generated-sources/avro</outputDirectory>
+                            <stringType>String</stringType>
+                            <enableDecimalLogicalType>true</enableDecimalLogicalType>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

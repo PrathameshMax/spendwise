@@ -3,6 +3,8 @@ package com.spendwise.notificationservice.messaging;
 import com.spendwise.common.messaging.EventIdentity;
 import com.spendwise.common.messaging.JdbcProcessedEventGuard;
 import com.spendwise.common.tracing.CorrelationIdConstants;
+import com.spendwise.events.avro.TransactionCreatedEvent;
+import com.spendwise.events.avro.TransactionReversedEvent;
 import com.spendwise.notificationservice.domain.NotificationLog;
 import com.spendwise.notificationservice.domain.NotificationLogRepository;
 import org.slf4j.Logger;
@@ -40,6 +42,9 @@ import java.util.UUID;
  * <p>Milestone 21 adds the second alert kind, {@link #recordReversalAlert}:
  * both kinds share one consumer name in {@code processed_events} because
  * every event has its own id, whatever its type.
+ *
+ * <p>Milestone 22 — both events are the Avro classes from spendwise-events,
+ * replacing this service's own JSON copies of them.
  */
 @Service
 public class TransactionAlertService {
@@ -65,8 +70,9 @@ public class TransactionAlertService {
     @Transactional
     public boolean recordAlert(EventIdentity eventIdentity, TransactionCreatedEvent event) {
         String message = "%s of %s %s recorded for %s".formatted(
-                event.type(), event.amount(), event.currency(), event.transactionDate());
-        return record(eventIdentity, event.userId(), event.transactionId(), message);
+                event.getType(), event.getAmount(), event.getCurrency(), event.getTransactionDate());
+        return record(eventIdentity, UUID.fromString(event.getUserId()), UUID.fromString(event.getTransactionId()),
+                message);
     }
 
     /**
@@ -78,9 +84,10 @@ public class TransactionAlertService {
     @Transactional
     public boolean recordReversalAlert(EventIdentity eventIdentity, TransactionReversedEvent event) {
         String message = "%s of %s %s on %s (%s) was rejected and reversed: %s".formatted(
-                event.type(), event.amount(), event.currency(), event.transactionDate(),
-                event.categoryName(), event.reason());
-        return record(eventIdentity, event.userId(), event.transactionId(), message);
+                event.getType(), event.getAmount(), event.getCurrency(), event.getTransactionDate(),
+                event.getCategoryName(), event.getReason());
+        return record(eventIdentity, UUID.fromString(event.getUserId()), UUID.fromString(event.getTransactionId()),
+                message);
     }
 
     private boolean record(EventIdentity eventIdentity, UUID userId, UUID transactionId, String text) {

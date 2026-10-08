@@ -2,7 +2,9 @@ package com.spendwise.common.messaging;
 
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Metrics;
+import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
@@ -12,12 +14,17 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.kafka.config.KafkaListenerEndpointRegistry;
 import org.springframework.kafka.core.KafkaOperations;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.listener.CommonErrorHandler;
 import org.springframework.kafka.listener.ConsumerAwareRebalanceListener;
 import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.kafka.listener.RecordInterceptor;
+import org.springframework.kafka.support.serializer.DeserializationException;
 import org.springframework.util.backoff.FixedBackOff;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * Milestone 18 — consumer-side cross-cutting behaviour for every service that
@@ -89,33 +96,63 @@ public class SpendwiseKafkaConsumerAutoConfiguration {
      *   partition moves on: one poison record costs about 3 s of delay, not
      *   a stalled partition.</li>
      *   <li><b>No retries for exceptions that can never succeed</b> — the
-     *   handler's built-in list (deserialization and conversion failures,
-     *   {@code ClassCastException}, ...) goes straight to the DLT. A payload
+     *   handler's built-in list (conversion failures, {@code ClassCastException},
+     *   ...) goes straight to the DLT. Since Milestone 22, deserialization
+     *   failures are decided by {@link DeserializationFailureBackOff}: a record
+     *   that is not valid Avro for a known schema gets one attempt, then is
+     *   parked; one that failed only because the Schema Registry was
+     *   unreachable is retried until the registry is back. A payload
      *   our own code fails to parse ({@code IllegalArgumentException}) is
      *   deliberately left retryable here, so the bounded-retry path is the
      *   one exercised; Q61's answer covers when to classify it as fatal.</li>
      * </ul>
      *
-     * <p>The recoverer publishes through Boot's auto-configured
-     * {@code KafkaTemplate}, with the platform's shared
-     * {@code spring.kafka.producer.*} settings (config-repo/application.yml
-     * since Milestone 21: {@code acks=all}, idempotence on, bounded timeouts)
-     * and the String serializers that
-     * match these listeners' String deserializers, so the dead-lettered value
-     * is byte-for-byte what was consumed.
+     * <p><b>Two dead-letter templates, chosen by the value's type (Milestone
+     * 22).</b> Values are Avro, so the record a listener received is either a
+     * generated {@code SpecificRecord} or — when it could not be decoded at all
+     * ({@code ErrorHandlingDeserializer}, config-repo/application.yml) — absent,
+     * with its raw bytes inside the {@code DeserializationException}.
+     * {@link DeadLetterPublishingRecoverer} publishes those raw bytes as the
+     * value, and picks the first template whose key type matches it:
+     * <ul>
+     *   <li>{@code byte[]} — a copy of Boot's template with a
+     *   {@link ByteArraySerializer}: the undecodable bytes are parked exactly as
+     *   they arrived. Through the Avro serializer they would be re-wrapped as an
+     *   Avro {@code bytes} value under a new schema — no longer the original
+     *   record.</li>
+     *   <li>anything else — Boot's own template (KafkaAvroSerializer): a record
+     *   that decoded fine but whose processing failed is written to the DLT as
+     *   the same Avro record, registered under {@code <topic>.DLT}'s own subject.</li>
+     * </ul>
+     * Both use the platform's shared {@code spring.kafka.producer.*} settings
+     * ({@code acks=all}, idempotence, bounded timeouts). The recoverer sends
+     * synchronously, so a parked record is acknowledged before its offset is
+     * committed.
      */
     @Bean
     @ConditionalOnMissingBean(CommonErrorHandler.class)
-    public CommonErrorHandler deadLetterErrorHandler(ObjectProvider<KafkaOperations<?, ?>> kafkaOperations,
+    @SuppressWarnings("unchecked")
+    public CommonErrorHandler deadLetterErrorHandler(ObjectProvider<KafkaTemplate<?, ?>> kafkaTemplate,
                                                      ObjectProvider<MeterRegistry> meterRegistry,
                                                      KafkaErrorHandlingProperties properties) {
-        DeadLetterPublishingRecoverer deadLetterPublisher = new DeadLetterPublishingRecoverer(
-                kafkaOperations.getObject(),
+        KafkaTemplate<Object, Object> avroTemplate = (KafkaTemplate<Object, Object>) kafkaTemplate.getObject();
+        KafkaTemplate<Object, Object> rawBytesTemplate = new KafkaTemplate<>(avroTemplate.getProducerFactory(),
+                Map.<String, Object>of(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class));
+        Map<Class<?>, KafkaOperations<?, ?>> templates = new LinkedHashMap<>();
+        templates.put(byte[].class, rawBytesTemplate);
+        templates.put(Object.class, avroTemplate);
+        DeadLetterPublishingRecoverer deadLetterPublisher = new DeadLetterPublishingRecoverer(templates,
                 (record, exception) -> new TopicPartition(DeadLetterTopics.of(record.topic()), record.partition()));
         MeteredDeadLetterRecoverer recoverer = new MeteredDeadLetterRecoverer(deadLetterPublisher,
                 meterRegistry.getIfAvailable(() -> Metrics.globalRegistry));
-        return new DefaultErrorHandler(recoverer,
+        DefaultErrorHandler errorHandler = new DefaultErrorHandler(recoverer,
                 new FixedBackOff(properties.retryInterval().toMillis(), properties.maxRetries()));
+        // Milestone 22 — deserialization failures are no longer fatal by type:
+        // DeserializationFailureBackOff decides per failure (registry
+        // unreachable: retry until it is back; anything else: DLT at once).
+        errorHandler.removeClassification(DeserializationException.class);
+        errorHandler.setBackOffFunction(new DeserializationFailureBackOff());
+        return errorHandler;
     }
 
     @Bean

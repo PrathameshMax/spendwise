@@ -1,10 +1,10 @@
 package com.spendwise.notificationservice.messaging;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.spendwise.common.messaging.EventHeaders;
 import com.spendwise.common.messaging.EventIdentity;
 import com.spendwise.common.messaging.IdempotencyMetrics;
+import com.spendwise.events.avro.TransactionCreatedEvent;
+import com.spendwise.events.avro.TransactionReversedEvent;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.header.Header;
@@ -51,6 +51,14 @@ import java.nio.charset.StandardCharsets;
  * ever see some of either event type. Any other type is skipped, so a future
  * event cannot be mis-read as one of these.
  *
+ * <p><b>Avro (Milestone 22).</b> Values arrive decoded as the generated
+ * classes, and dispatch is a type switch on them (Java 21 pattern matching)
+ * rather than on the {@code eventType} header and a JSON parse. A record that
+ * is not valid Avro for a registered schema, or whose record type has no class
+ * in this build, never reaches this method: it fails in deserialization and
+ * goes straight to {@code transaction-events.DLT} (one attempt, no retries),
+ * where it can be replayed once a consumer that knows it is deployed.
+ *
  * <p>A payload that cannot be parsed is rethrown. The platform's error handler
  * (Milestone 20, spendwise-common) retries it 3 times, 1 s apart, then
  * publishes it to {@code transaction-events.DLT} and moves on to the next
@@ -59,54 +67,39 @@ import java.nio.charset.StandardCharsets;
 @Component
 public class TransactionAlertListener {
 
-    static final String CREATED_EVENT_TYPE = "TransactionCreatedEvent";
-    static final String REVERSED_EVENT_TYPE = "TransactionReversedEvent";
 
     private static final Logger log = LoggerFactory.getLogger(TransactionAlertListener.class);
 
-    private final ObjectMapper objectMapper;
     private final TransactionAlertService transactionAlertService;
     private final MeterRegistry meterRegistry;
 
-    public TransactionAlertListener(ObjectMapper objectMapper, TransactionAlertService transactionAlertService,
-                                    MeterRegistry meterRegistry) {
-        this.objectMapper = objectMapper;
+    public TransactionAlertListener(TransactionAlertService transactionAlertService, MeterRegistry meterRegistry) {
         this.transactionAlertService = transactionAlertService;
         this.meterRegistry = meterRegistry;
     }
 
     @KafkaListener(id = TransactionAlertService.CONSUMER, idIsGroup = false,
             topics = "${spendwise.kafka.topics.transaction-events}")
-    public void onTransactionEvent(ConsumerRecord<String, String> record) {
-        String eventType = header(record, EventHeaders.EVENT_TYPE);
+    public void onTransactionEvent(ConsumerRecord<String, Object> record) {
         EventIdentity eventIdentity = EventIdentity.of(record);
         boolean firstDelivery;
-        if (CREATED_EVENT_TYPE.equals(eventType)) {
-            firstDelivery = transactionAlertService.recordAlert(eventIdentity,
-                    parse(record, TransactionCreatedEvent.class));
-        } else if (REVERSED_EVENT_TYPE.equals(eventType)) {
-            firstDelivery = transactionAlertService.recordReversalAlert(eventIdentity,
-                    parse(record, TransactionReversedEvent.class));
-        } else {
-            log.debug("Skipping {} at {}-{}@{}: not handled by this listener",
-                    eventType, record.topic(), record.partition(), record.offset());
-            return;
+        switch (record.value()) {
+            case TransactionCreatedEvent created ->
+                    firstDelivery = transactionAlertService.recordAlert(eventIdentity, created);
+            case TransactionReversedEvent reversed ->
+                    firstDelivery = transactionAlertService.recordReversalAlert(eventIdentity, reversed);
+            case null, default -> {
+                log.debug("Skipping {} at {}-{}@{}: not handled by this listener",
+                        header(record, EventHeaders.EVENT_TYPE), record.topic(), record.partition(), record.offset());
+                return;
+            }
         }
         IdempotencyMetrics.record(meterRegistry, TransactionAlertService.CONSUMER, firstDelivery);
-        log.debug("{} {} from partition {} offset {}: {}", eventType, eventIdentity, record.partition(),
-                record.offset(), firstDelivery ? "processed" : "duplicate, skipped");
+        log.debug("{} {} from partition {} offset {}: {}", record.value().getClass().getSimpleName(), eventIdentity,
+                record.partition(), record.offset(), firstDelivery ? "processed" : "duplicate, skipped");
     }
 
-    private <T> T parse(ConsumerRecord<String, String> record, Class<T> type) {
-        try {
-            return objectMapper.readValue(record.value(), type);
-        } catch (JsonProcessingException ex) {
-            throw new IllegalArgumentException("Unparseable %s at %s-%d@%d"
-                    .formatted(type.getSimpleName(), record.topic(), record.partition(), record.offset()), ex);
-        }
-    }
-
-    private static String header(ConsumerRecord<String, String> record, String name) {
+    private static String header(ConsumerRecord<String, Object> record, String name) {
         Header header = record.headers().lastHeader(name);
         return header == null || header.value() == null ? null : new String(header.value(), StandardCharsets.UTF_8);
     }

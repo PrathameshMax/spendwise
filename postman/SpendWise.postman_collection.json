@@ -285,6 +285,56 @@
       "key": "m21AnalyticsProcessed",
       "value": "",
       "description": "Milestone 21 baseline: transaction-ingestion processed."
+    },
+    {
+      "key": "schemaRegistryUrl",
+      "value": "http://localhost:8091",
+      "description": "Milestone 22: Confluent Schema Registry (host port 8091, loopback only)."
+    },
+    {
+      "key": "m22Subject",
+      "value": "transaction-events-com.spendwise.events.avro.TransactionCreatedEvent",
+      "description": "Milestone 22: subject of TransactionCreatedEvent under TopicRecordNameStrategy."
+    },
+    {
+      "key": "m22SchemaV1",
+      "value": "",
+      "description": "Milestone 22: latest registered TransactionCreatedEvent schema (JSON string)."
+    },
+    {
+      "key": "m22VersionCount",
+      "value": "",
+      "description": "Milestone 22: number of versions under the subject before the plan's changes."
+    },
+    {
+      "key": "m22AddedVersion",
+      "value": "",
+      "description": "Milestone 22: version number the additive change was registered as."
+    },
+    {
+      "key": "m22BreakingBody",
+      "value": "",
+      "description": "Milestone 22: request body with the breaking schema."
+    },
+    {
+      "key": "m22AdditiveBody",
+      "value": "",
+      "description": "Milestone 22: request body with the additive schema."
+    },
+    {
+      "key": "m22NotifProcessed",
+      "value": "",
+      "description": "Milestone 22 baseline: transaction-alerts processed."
+    },
+    {
+      "key": "m22AnalyticsProcessed",
+      "value": "",
+      "description": "Milestone 22 baseline: transaction-ingestion processed."
+    },
+    {
+      "key": "m21RejectedAt",
+      "value": "",
+      "description": "Milestone 21 test plan: rejectedAt of the replayed rejection."
     }
   ],
   "item": [
@@ -5013,12 +5063,43 @@
     },
     {
       "name": "Milestone 20 - Test Plan",
-      "description": "Poison-pill chaos lab, driven entirely from Postman. Needs Kafka UI running (docker compose --profile tools up -d kafka-ui) \u2014 its REST API puts records on the topic. Run the folders in order, in the Collection Runner if you like (3.1 waits 12 s itself), with notification-service at one replica. 2.1 puts a malformed record on partition 0; 2.2 puts a valid record on the SAME partition, right behind it. Each consumer group must retry the poison 3 times, publish it to transaction-events.DLT, and then process the valid record \u2014 a poison pill delays a partition, it does not stop it.",
+      "description": "Poison-pill chaos lab, driven entirely from Postman. Needs Kafka UI running (docker compose --profile tools up -d kafka-ui) \u2014 its REST API puts records on the topic. Run the folders in order, in the Collection Runner if you like (3.1 waits 12 s itself), with notification-service at one replica. 2.1 puts a malformed record on partition 0; 2.2 puts a valid record on the SAME partition, right behind it. Each consumer group must publish the poison to transaction-events.DLT and then process the valid record \u2014 a poison pill delays a partition, it does not stop it. Since Milestone 22 values are Avro: the poison is not Avro at all, so it fails in deserialization, which is non-retryable \u2014 one attempt, straight to the DLT (it was 1 + 3 retries while values were JSON). The valid record is produced as Avro through Kafka UI's TransactionCreatedAvro serde (infra/kafka-ui/config.yml), which needs the TransactionCreatedEvent subject to exist: run the Milestone 22 plan (or create any transaction) first.",
       "item": [
         {
           "name": "1. Preconditions and baselines",
           "description": "Kafka UI is writable, the DLT topic exists, and the current counts.",
           "item": [
+            {
+              "name": "1.0 TransactionCreatedEvent schema is registered (needed to produce Avro in 2.2)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{schemaRegistryUrl}}/subjects/transaction-events-com.spendwise.events.avro.TransactionCreatedEvent/versions/latest",
+                  "host": [
+                    "{{schemaRegistryUrl}}"
+                  ],
+                  "path": [
+                    "subjects",
+                    "transaction-events-com.spendwise.events.avro.TransactionCreatedEvent",
+                    "versions",
+                    "latest"
+                  ]
+                },
+                "description": "Milestone 22 \u2014 Kafka UI's TransactionCreatedAvro serde encodes with the subject's latest schema. A 404 means no transaction was published since the last `docker compose down`: create one (Milestone 22 plan, 1.6) and re-run."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('200 OK - subject exists', () => pm.response.to.have.status(200));"
+                    ]
+                  }
+                }
+              ]
+            },
             {
               "name": "1.1 transaction-events.DLT exists (3 partitions, RF 3)",
               "request": {
@@ -5446,10 +5527,10 @@
                     "messages"
                   ]
                 },
-                "description": "A well-formed event with a fresh outboxEventId. It sits after the poison on the same partition, so it can only be processed once the poison has been moved aside.",
+                "description": "A well-formed Avro TransactionCreatedEvent with a fresh outboxEventId, encoded by Kafka UI with the latest registered schema (valueSerde TransactionCreatedAvro; decimals as strings with 2 decimals, null for the optional fields). It sits after the poison on the same partition, so it can only be processed once the poison has been moved aside.",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"partition\": 0,\n  \"key\": \"{{m20TxId}}\",\n  \"value\": \"{\\\"transactionId\\\":\\\"{{m20TxId}}\\\",\\\"userId\\\":\\\"{{m20UserId}}\\\",\\\"categoryId\\\":\\\"{{m20CategoryId}}\\\",\\\"amount\\\":75.5,\\\"type\\\":\\\"EXPENSE\\\",\\\"transactionDate\\\":\\\"{{today}}\\\",\\\"currency\\\":\\\"INR\\\",\\\"baseCurrencyAmount\\\":null,\\\"createdAt\\\":\\\"{{m20CreatedAt}}\\\"}\",\n  \"keySerde\": \"String\",\n  \"valueSerde\": \"String\",\n  \"headers\": {\n    \"eventType\": \"TransactionCreatedEvent\",\n    \"aggregateType\": \"Transaction\",\n    \"outboxEventId\": \"{{m20ValidId}}\",\n    \"X-Correlation-ID\": \"m20-valid-{{m20ValidId}}\"\n  }\n}"
+                  "raw": "{\n  \"partition\": 0,\n  \"key\": \"{{m20TxId}}\",\n  \"value\": \"{\\\"transactionId\\\":\\\"{{m20TxId}}\\\",\\\"userId\\\":\\\"{{m20UserId}}\\\",\\\"categoryId\\\":\\\"{{m20CategoryId}}\\\",\\\"amount\\\":\\\"75.50\\\",\\\"type\\\":\\\"EXPENSE\\\",\\\"transactionDate\\\":\\\"{{today}}\\\",\\\"currency\\\":\\\"INR\\\",\\\"baseCurrencyAmount\\\":null,\\\"createdAt\\\":\\\"{{m20CreatedAt}}\\\"}\",\n  \"keySerde\": \"String\",\n  \"valueSerde\": \"TransactionCreatedAvro\",\n  \"headers\": {\n    \"eventType\": \"TransactionCreatedEvent\",\n    \"aggregateType\": \"Transaction\",\n    \"outboxEventId\": \"{{m20ValidId}}\",\n    \"X-Correlation-ID\": \"m20-valid-{{m20ValidId}}\"\n  }\n}"
                 }
               },
               "event": [
@@ -5483,10 +5564,10 @@
         },
         {
           "name": "3. Retried, dead-lettered, partition kept moving",
-          "description": "3.1 waits 12 s first. Then: 4 failed attempts and 1 dead-letter per consumer group, the valid record processed by each, and three copies of the poison on transaction-events.DLT partition 0 (one per group: notification-, analytics- and, since Milestone 21, budget-service). In Kafka UI > Topics > transaction-events.DLT > Messages, open either copy: headers kafka_dlt-original-topic/-partition/-offset, kafka_dlt-original-consumer-group, kafka_dlt-exception-message (the parse error), plus the original X-Correlation-ID m20-poison-....",
+          "description": "3.1 waits 12 s first. Then: 1 failed attempt (deserialization failures are not retried) and 1 dead-letter per consumer group, the valid record processed by each, and three copies of the poison on transaction-events.DLT partition 0 (one per group: notification-, analytics- and, since Milestone 21, budget-service). In Kafka UI > Topics > transaction-events.DLT > Messages, open either copy: headers kafka_dlt-original-topic/-partition/-offset, kafka_dlt-original-consumer-group, kafka_dlt-exception-message (\"Unknown magic byte!\": the bytes are not in the Schema Registry wire format), and the value exactly as produced, plus the original X-Correlation-ID m20-poison-....",
           "item": [
             {
-              "name": "3.1 notification-service: poison attempted 4 times (1 + 3 retries)",
+              "name": "3.1 notification-service: poison attempted once (not retried: deserialization failure)",
               "request": {
                 "method": "GET",
                 "header": [],
@@ -5511,7 +5592,7 @@
                     }
                   ]
                 },
-                "description": "notification-service: poison attempted 4 times (1 + 3 retries)."
+                "description": "notification-service: poison attempted once (not retried: deserialization failure)."
               },
               "event": [
                 {
@@ -5519,7 +5600,7 @@
                   "script": {
                     "type": "text/javascript",
                     "exec": [
-                      "// 4 attempts 1 s apart, then the dead-letter publish, then the valid record",
+                      "// Since Milestone 22: 1 attempt (not Avro: not retried), the dead-letter publish, then the valid record",
                       "// behind it: give both consumers time before reading anything.",
                       "setTimeout(() => {}, 12000);",
                       "// Docker assigns notification-service a port from 18085-18088; find the live one.",
@@ -5546,14 +5627,14 @@
                       "pm.test('metric endpoint answered (200, or 404 = zero so far)', () => pm.expect([200, 404]).to.include(pm.response.code));",
                       "const delta = count - Number(pm.collectionVariables.get('m20NotifFailures') || 0);",
                       "console.log('m20NotifFailures delta =', delta);",
-                      "pm.test('notification-service: poison attempted 4 times (1 + 3 retries) (delta = 4)', () => pm.expect(delta).to.eql(4));"
+                      "pm.test('notification-service: poison attempted once (not retried: deserialization failure) (delta = 1)', () => pm.expect(delta).to.eql(1));"
                     ]
                   }
                 }
               ]
             },
             {
-              "name": "3.2 analytics-service: poison attempted 4 times (1 + 3 retries)",
+              "name": "3.2 analytics-service: poison attempted once (not retried: deserialization failure)",
               "request": {
                 "method": "GET",
                 "header": [],
@@ -5578,7 +5659,7 @@
                     }
                   ]
                 },
-                "description": "analytics-service: poison attempted 4 times (1 + 3 retries)."
+                "description": "analytics-service: poison attempted once (not retried: deserialization failure)."
               },
               "event": [
                 {
@@ -5591,7 +5672,7 @@
                       "pm.test('metric endpoint answered (200, or 404 = zero so far)', () => pm.expect([200, 404]).to.include(pm.response.code));",
                       "const delta = count - Number(pm.collectionVariables.get('m20AnalyticsFailures') || 0);",
                       "console.log('m20AnalyticsFailures delta =', delta);",
-                      "pm.test('analytics-service: poison attempted 4 times (1 + 3 retries) (delta = 4)', () => pm.expect(delta).to.eql(4));"
+                      "pm.test('analytics-service: poison attempted once (not retried: deserialization failure) (delta = 1)', () => pm.expect(delta).to.eql(1));"
                     ]
                   }
                 }
@@ -6845,10 +6926,10 @@
                     "messages"
                   ]
                 },
-                "description": "As if budget-service had decided twice.",
+                "description": "As if budget-service had decided twice. Since Milestone 22 the value is Avro, encoded by Kafka UI with the registered TransactionRejectedEvent schema (valueSerde TransactionRejectedAvro, infra/kafka-ui/config.yml).",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"partition\": 0,\n  \"key\": \"{{m21TxRejected}}\",\n  \"value\": \"{\\\"transactionId\\\":\\\"{{m21TxRejected}}\\\",\\\"userId\\\":\\\"{{userId}}\\\",\\\"reason\\\":\\\"Postman replay of a rejection that was already compensated\\\"}\",\n  \"keySerde\": \"String\",\n  \"valueSerde\": \"String\",\n  \"headers\": {\n    \"eventType\": \"TransactionRejectedEvent\",\n    \"aggregateType\": \"Transaction\",\n    \"outboxEventId\": \"{{m21ReplayId}}\",\n    \"X-Correlation-ID\": \"m21-replay-{{m21ReplayId}}\"\n  }\n}"
+                  "raw": "{\n  \"partition\": 0,\n  \"key\": \"{{m21TxRejected}}\",\n  \"value\": \"{\\\"transactionId\\\":\\\"{{m21TxRejected}}\\\",\\\"userId\\\":\\\"{{userId}}\\\",\\\"budgetId\\\":\\\"{{m21BudgetId}}\\\",\\\"category\\\":\\\"{{m21CategoryName}}\\\",\\\"periodMonth\\\":\\\"{{periodMonth}}\\\",\\\"cappedAmount\\\":\\\"10000.00\\\",\\\"currentSpend\\\":\\\"6000.00\\\",\\\"attemptedAmount\\\":\\\"5000.00\\\",\\\"reason\\\":\\\"Postman replay of a rejection that was already compensated\\\",\\\"rejectedAt\\\":\\\"{{m21RejectedAt}}\\\"}\",\n  \"keySerde\": \"String\",\n  \"valueSerde\": \"TransactionRejectedAvro\",\n  \"headers\": {\n    \"eventType\": \"TransactionRejectedEvent\",\n    \"aggregateType\": \"Transaction\",\n    \"outboxEventId\": \"{{m21ReplayId}}\",\n    \"X-Correlation-ID\": \"m21-replay-{{m21ReplayId}}\"\n  }\n}"
                 }
               },
               "event": [
@@ -6857,7 +6938,8 @@
                   "script": {
                     "type": "text/javascript",
                     "exec": [
-                      "pm.collectionVariables.set('m21ReplayId', pm.variables.replaceIn('{{$guid}}'));"
+                      "pm.collectionVariables.set('m21ReplayId', pm.variables.replaceIn('{{$guid}}'));",
+                      "pm.collectionVariables.set('m21RejectedAt', new Date().toISOString());"
                     ]
                   }
                 },
@@ -6975,6 +7057,1278 @@
                       "const reversals = rows.filter(r => r.reversesTransactionId === pm.collectionVariables.get('m21TxRejected'));",
                       "pm.test('one REVERSAL row', () => pm.expect(reversals.length).to.eql(1));",
                       "pm.test('3 entries in this category', () => pm.expect(rows.length).to.eql(3));"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Milestone 22 - Test Plan",
+      "description": "Schema governance, driven from Postman against the Schema Registry's REST API (host port 8091) and the services. Run in order; the Collection Runner works (2.1 and 4.4 wait for consumers). Folder 2 proves the events are now Avro and registered; folder 3 submits a breaking change exactly as the producer's serializer would (POST /subjects/{subject}/versions, which is what auto.register.schemas calls) and the registry refuses it; folder 4 submits the compatible version of the change, which is accepted while the running producer keeps working; folder 5 deletes that version again so the registry matches the code. Keep notification-service at one replica.",
+      "item": [
+        {
+          "name": "0. Registry preconditions",
+          "description": "The global compatibility level.",
+          "item": [
+            {
+              "name": "0.1 Global compatibility is FULL_TRANSITIVE",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{schemaRegistryUrl}}/config",
+                  "host": [
+                    "{{schemaRegistryUrl}}"
+                  ],
+                  "path": [
+                    "config"
+                  ]
+                },
+                "description": "Set in docker-compose.yml (SCHEMA_REGISTRY_SCHEMA_COMPATIBILITY_LEVEL)."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                      "pm.test('compatibilityLevel FULL_TRANSITIVE', () => pm.expect(pm.response.json().compatibilityLevel).to.eql('FULL_TRANSITIVE'));"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "1. Setup and one Avro event",
+          "description": "User, category, baselines, one transaction.",
+          "item": [
+            {
+              "name": "1.1 Register (via Gateway)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/api/v1/auth/register",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "auth",
+                    "register"
+                  ]
+                },
+                "description": "Fresh email per run.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"m22-{{$timestamp}}@spendwise.dev\",\n  \"rawPassword\": \"ChangeMe123!\"\n}"
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                      "pm.collectionVariables.set('accessToken', pm.response.json().accessToken);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "1.2 Create user profile (via Gateway)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/api/v1/users",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "users"
+                  ]
+                },
+                "description": "Base currency INR.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"m22-profile-{{$timestamp}}@spendwise.dev\",\n  \"fullName\": \"Milestone 22 Tester\",\n  \"preferredCurrency\": \"INR\"\n}"
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                      "pm.collectionVariables.set('userId', pm.response.json().id);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "1.3 Create category (via Gateway)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/api/v1/categories",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "categories"
+                  ]
+                },
+                "description": "Fresh name.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"M22 Books {{$timestamp}}\"\n}"
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                      "pm.collectionVariables.set('categoryId', pm.response.json().id);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "1.4 Baseline - notification-service processed",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{notificationServiceUrl}}/actuator/metrics/spendwise.kafka.events.idempotency?tag=consumer:transaction-alerts&tag=outcome:processed",
+                  "host": [
+                    "{{notificationServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "spendwise.kafka.events.idempotency"
+                  ],
+                  "query": [
+                    {
+                      "key": "tag",
+                      "value": "consumer:transaction-alerts"
+                    },
+                    {
+                      "key": "tag",
+                      "value": "outcome:processed"
+                    }
+                  ]
+                },
+                "description": "Starting count."
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// Docker assigns notification-service a port from 18085-18088; find the live one.",
+                      "const ports = [18085, 18086, 18087, 18088];",
+                      "function probe(i) {",
+                      "  if (i >= ports.length) { console.warn('No notification-service replica answered on 18085-18088'); return; }",
+                      "  const base = 'http://localhost:' + ports[i];",
+                      "  pm.sendRequest({ url: base + '/actuator/health', method: 'GET' }, (err, res) => {",
+                      "    if (!err && res.code === 200) { pm.collectionVariables.set('notificationServiceUrl', base); }",
+                      "    else { probe(i + 1); }",
+                      "  });",
+                      "}",
+                      "probe(0);"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 404 = nothing counted yet for these tags: 0.",
+                      "const count = pm.response.code === 404 ? 0 : pm.response.json().measurements.find(m => m.statistic === 'COUNT').value;",
+                      "pm.test('metric endpoint answered (200, or 404 = zero so far)', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                      "pm.collectionVariables.set('m22NotifProcessed', count);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "1.5 Baseline - analytics-service processed",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{analyticsServiceUrl}}/actuator/metrics/spendwise.kafka.events.idempotency?tag=consumer:transaction-ingestion&tag=outcome:processed",
+                  "host": [
+                    "{{analyticsServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "spendwise.kafka.events.idempotency"
+                  ],
+                  "query": [
+                    {
+                      "key": "tag",
+                      "value": "consumer:transaction-ingestion"
+                    },
+                    {
+                      "key": "tag",
+                      "value": "outcome:processed"
+                    }
+                  ]
+                },
+                "description": "Starting count."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 404 = nothing counted yet for these tags: 0.",
+                      "const count = pm.response.code === 404 ? 0 : pm.response.json().measurements.find(m => m.statistic === 'COUNT').value;",
+                      "pm.test('metric endpoint answered (200, or 404 = zero so far)', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                      "pm.collectionVariables.set('m22AnalyticsProcessed', count);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "1.6 Create transaction of 1234.5",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/api/v1/transactions",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "transactions"
+                  ]
+                },
+                "description": "Scale 1 on purpose: the relay sets every amount to decimal(19,2) before Avro encodes it.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"userId\": \"{{userId}}\",\n  \"categoryId\": \"{{categoryId}}\",\n  \"amount\": 1234.5,\n  \"type\": \"EXPENSE\",\n  \"description\": \"Milestone 22 Avro\",\n  \"transactionDate\": \"{{today}}\",\n  \"currency\": \"INR\"\n}"
+                }
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const now = new Date();",
+                      "pm.collectionVariables.set('today', now.toISOString().slice(0, 10));",
+                      "pm.collectionVariables.set('periodMonth', now.toISOString().slice(0, 7));"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                      "pm.collectionVariables.set('transactionId', pm.response.json().id);"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "2. The event is Avro, and its schema is registered",
+          "description": "2.1 waits 8 s for relay and consumers.",
+          "item": [
+            {
+              "name": "2.1 Subject registered by the producer",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{schemaRegistryUrl}}/subjects",
+                  "host": [
+                    "{{schemaRegistryUrl}}"
+                  ],
+                  "path": [
+                    "subjects"
+                  ]
+                },
+                "description": "transaction-service's serializer registered the schema on its first send (TopicRecordNameStrategy: <topic>-<record full name>)."
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// Let the relay publish (and register) and the consumers read.",
+                      "setTimeout(() => {}, 8000);"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                      "const subjects = pm.response.json();",
+                      "console.log('Subjects:', subjects);",
+                      "pm.test('TransactionCreatedEvent subject exists', () => pm.expect(subjects).to.include(pm.collectionVariables.get('m22Subject')));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "2.2 Latest version of TransactionCreatedEvent",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{schemaRegistryUrl}}/subjects/{{m22Subject}}/versions/latest",
+                  "host": [
+                    "{{schemaRegistryUrl}}"
+                  ],
+                  "path": [
+                    "subjects",
+                    "{{m22Subject}}",
+                    "versions",
+                    "latest"
+                  ]
+                },
+                "description": "The contract as registered: plain Avro (no avro.java.string), with currency required."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                      "const r = pm.response.json();",
+                      "const schema = JSON.parse(r.schema);",
+                      "pm.collectionVariables.set('m22SchemaV1', r.schema);",
+                      "console.log('Subject', r.subject, 'version', r.version, 'schema id', r.id);",
+                      "pm.test('record com.spendwise.events.avro.TransactionCreatedEvent', () => pm.expect(schema.namespace + '.' + schema.name).to.eql('com.spendwise.events.avro.TransactionCreatedEvent'));",
+                      "const currency = schema.fields.find(f => f.name === 'currency');",
+                      "pm.test('currency is a required string', () => { pm.expect(currency.type).to.eql('string'); pm.expect(currency).to.not.have.property('default'); });",
+                      "pm.test('Java-only properties stripped (avro.remove.java.properties)', () => pm.expect(r.schema).to.not.include('avro.java.string'));",
+                      "pm.test('amount is decimal(19,2)', () => pm.expect(schema.fields.find(f => f.name === 'amount').type).to.eql({ type: 'bytes', logicalType: 'decimal', precision: 19, scale: 2 }));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "2.3 Version list before any change",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{schemaRegistryUrl}}/subjects/{{m22Subject}}/versions",
+                  "host": [
+                    "{{schemaRegistryUrl}}"
+                  ],
+                  "path": [
+                    "subjects",
+                    "{{m22Subject}}",
+                    "versions"
+                  ]
+                },
+                "description": "Counted for folders 3-5."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                      "pm.collectionVariables.set('m22VersionCount', pm.response.json().length);",
+                      "console.log('Versions:', pm.response.json());"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "2.4 notification-service decoded and processed the Avro event",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{notificationServiceUrl}}/actuator/metrics/spendwise.kafka.events.idempotency?tag=consumer:transaction-alerts&tag=outcome:processed",
+                  "host": [
+                    "{{notificationServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "spendwise.kafka.events.idempotency"
+                  ],
+                  "query": [
+                    {
+                      "key": "tag",
+                      "value": "consumer:transaction-alerts"
+                    },
+                    {
+                      "key": "tag",
+                      "value": "outcome:processed"
+                    }
+                  ]
+                },
+                "description": "notification-service decoded and processed the Avro event."
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// Docker assigns notification-service a port from 18085-18088; find the live one.",
+                      "const ports = [18085, 18086, 18087, 18088];",
+                      "function probe(i) {",
+                      "  if (i >= ports.length) { console.warn('No notification-service replica answered on 18085-18088'); return; }",
+                      "  const base = 'http://localhost:' + ports[i];",
+                      "  pm.sendRequest({ url: base + '/actuator/health', method: 'GET' }, (err, res) => {",
+                      "    if (!err && res.code === 200) { pm.collectionVariables.set('notificationServiceUrl', base); }",
+                      "    else { probe(i + 1); }",
+                      "  });",
+                      "}",
+                      "probe(0);"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 404 = nothing counted yet for these tags: 0.",
+                      "const count = pm.response.code === 404 ? 0 : pm.response.json().measurements.find(m => m.statistic === 'COUNT').value;",
+                      "pm.test('metric endpoint answered (200, or 404 = zero so far)', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                      "const delta = count - Number(pm.collectionVariables.get('m22NotifProcessed') || 0);",
+                      "console.log('m22NotifProcessed delta =', delta);",
+                      "pm.test('notification-service decoded and processed the Avro event (delta = 1)', () => pm.expect(delta).to.eql(1));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "2.5 analytics-service decoded and processed the Avro event",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{analyticsServiceUrl}}/actuator/metrics/spendwise.kafka.events.idempotency?tag=consumer:transaction-ingestion&tag=outcome:processed",
+                  "host": [
+                    "{{analyticsServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "spendwise.kafka.events.idempotency"
+                  ],
+                  "query": [
+                    {
+                      "key": "tag",
+                      "value": "consumer:transaction-ingestion"
+                    },
+                    {
+                      "key": "tag",
+                      "value": "outcome:processed"
+                    }
+                  ]
+                },
+                "description": "analytics-service decoded and processed the Avro event."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 404 = nothing counted yet for these tags: 0.",
+                      "const count = pm.response.code === 404 ? 0 : pm.response.json().measurements.find(m => m.statistic === 'COUNT').value;",
+                      "pm.test('metric endpoint answered (200, or 404 = zero so far)', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                      "const delta = count - Number(pm.collectionVariables.get('m22AnalyticsProcessed') || 0);",
+                      "console.log('m22AnalyticsProcessed delta =', delta);",
+                      "pm.test('analytics-service decoded and processed the Avro event (delta = 1)', () => pm.expect(delta).to.eql(1));"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "3. A breaking change is refused",
+          "description": "Remove the required field currency. Under FULL_TRANSITIVE the registry rejects it, because every consumer still running reads currency and has no default for it (the forward half of FULL). 3.4-3.6 show the same change would pass under BACKWARD alone, then restore the subject.",
+          "item": [
+            {
+              "name": "3.1 Compatibility check: removing currency",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/vnd.schemaregistry.v1+json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{schemaRegistryUrl}}/compatibility/subjects/{{m22Subject}}/versions?verbose=true",
+                  "host": [
+                    "{{schemaRegistryUrl}}"
+                  ],
+                  "path": [
+                    "compatibility",
+                    "subjects",
+                    "{{m22Subject}}",
+                    "versions"
+                  ],
+                  "query": [
+                    {
+                      "key": "verbose",
+                      "value": "true"
+                    }
+                  ]
+                },
+                "description": "Same check as registration, against every version (the subject's level is FULL_TRANSITIVE).",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{{m22BreakingBody}}"
+                }
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// Version 1 as registered, minus the required field currency (no default).",
+                      "const v1 = JSON.parse(pm.collectionVariables.get('m22SchemaV1'));",
+                      "v1.fields = v1.fields.filter(f => f.name !== 'currency');",
+                      "pm.collectionVariables.set('m22BreakingBody', JSON.stringify({ schema: JSON.stringify(v1) }));"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                      "const r = pm.response.json();",
+                      "console.log('Registry says:', r.messages);",
+                      "pm.test('is_compatible = false', () => pm.expect(r.is_compatible).to.eql(false));",
+                      "pm.test('the reason names currency', () => pm.expect(JSON.stringify(r.messages)).to.include('currency'));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "3.2 Register it, as the producer's serializer would: 409",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/vnd.schemaregistry.v1+json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{schemaRegistryUrl}}/subjects/{{m22Subject}}/versions",
+                  "host": [
+                    "{{schemaRegistryUrl}}"
+                  ],
+                  "path": [
+                    "subjects",
+                    "{{m22Subject}}",
+                    "versions"
+                  ]
+                },
+                "description": "auto.register.schemas makes KafkaAvroSerializer send exactly this request; a 409 here is the SerializationException the producer gets, and the record never reaches the topic.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{{m22BreakingBody}}"
+                }
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// Version 1 as registered, minus the required field currency (no default).",
+                      "const v1 = JSON.parse(pm.collectionVariables.get('m22SchemaV1'));",
+                      "v1.fields = v1.fields.filter(f => f.name !== 'currency');",
+                      "pm.collectionVariables.set('m22BreakingBody', JSON.stringify({ schema: JSON.stringify(v1) }));"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('409 Conflict', () => pm.response.to.have.status(409));",
+                      "const r = pm.response.json();",
+                      "console.log('Registry says:', r.message);",
+                      "pm.test('error_code 409', () => pm.expect(r.error_code).to.eql(409));",
+                      "pm.test('message: incompatible', () => pm.expect(r.message).to.include('incompatible'));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "3.3 No version was added",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{schemaRegistryUrl}}/subjects/{{m22Subject}}/versions",
+                  "host": [
+                    "{{schemaRegistryUrl}}"
+                  ],
+                  "path": [
+                    "subjects",
+                    "{{m22Subject}}",
+                    "versions"
+                  ]
+                },
+                "description": "Still the same list."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                      "pm.test('version count unchanged', () => pm.expect(pm.response.json().length).to.eql(Number(pm.collectionVariables.get('m22VersionCount'))));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "3.4 Temporarily set this subject to BACKWARD",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/vnd.schemaregistry.v1+json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{schemaRegistryUrl}}/config/{{m22Subject}}",
+                  "host": [
+                    "{{schemaRegistryUrl}}"
+                  ],
+                  "path": [
+                    "config",
+                    "{{m22Subject}}"
+                  ]
+                },
+                "description": "Subject-level override of the global level.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"compatibility\": \"BACKWARD\"\n}"
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                      "pm.test('compatibility BACKWARD', () => pm.expect(pm.response.json().compatibility).to.eql('BACKWARD'));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "3.5 Same removal under BACKWARD: accepted",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/vnd.schemaregistry.v1+json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{schemaRegistryUrl}}/compatibility/subjects/{{m22Subject}}/versions?verbose=true",
+                  "host": [
+                    "{{schemaRegistryUrl}}"
+                  ],
+                  "path": [
+                    "compatibility",
+                    "subjects",
+                    "{{m22Subject}}",
+                    "versions"
+                  ],
+                  "query": [
+                    {
+                      "key": "verbose",
+                      "value": "true"
+                    }
+                  ]
+                },
+                "description": "BACKWARD only asks whether the NEW schema can read OLD data \u2014 it can, it just ignores currency. It does not protect consumers that are still on the old schema. Dry run only: nothing is registered.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{{m22BreakingBody}}"
+                }
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// Version 1 as registered, minus the required field currency (no default).",
+                      "const v1 = JSON.parse(pm.collectionVariables.get('m22SchemaV1'));",
+                      "v1.fields = v1.fields.filter(f => f.name !== 'currency');",
+                      "pm.collectionVariables.set('m22BreakingBody', JSON.stringify({ schema: JSON.stringify(v1) }));"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                      "pm.test('is_compatible = true under BACKWARD', () => pm.expect(pm.response.json().is_compatible).to.eql(true));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "3.6 Remove the override: back to FULL_TRANSITIVE",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{schemaRegistryUrl}}/config/{{m22Subject}}",
+                  "host": [
+                    "{{schemaRegistryUrl}}"
+                  ],
+                  "path": [
+                    "config",
+                    "{{m22Subject}}"
+                  ]
+                },
+                "description": "Run this even if 3.5 failed."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                      "pm.sendRequest(pm.variables.replaceIn('{{schemaRegistryUrl}}/config/{{m22Subject}}?defaultToGlobal=true'), (err, res) => {",
+                      "  pm.test('effective level FULL_TRANSITIVE again', () => pm.expect(res.json().compatibilityLevel).to.eql('FULL_TRANSITIVE'));",
+                      "});"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "4. The same intent as an additive change is accepted",
+          "description": "Keep currency; add the new information as an optional field with a default. Old readers ignore it, new readers default it when reading old data \u2014 compatible in both directions.",
+          "item": [
+            {
+              "name": "4.1 Compatibility check: add optional baseCurrency",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/vnd.schemaregistry.v1+json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{schemaRegistryUrl}}/compatibility/subjects/{{m22Subject}}/versions?verbose=true",
+                  "host": [
+                    "{{schemaRegistryUrl}}"
+                  ],
+                  "path": [
+                    "compatibility",
+                    "subjects",
+                    "{{m22Subject}}",
+                    "versions"
+                  ],
+                  "query": [
+                    {
+                      "key": "verbose",
+                      "value": "true"
+                    }
+                  ]
+                },
+                "description": "Against every registered version.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{{m22AdditiveBody}}"
+                }
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// Version 1 as registered, plus an optional field with a default.",
+                      "const v1 = JSON.parse(pm.collectionVariables.get('m22SchemaV1'));",
+                      "v1.fields.push({ name: 'baseCurrency', type: ['null', 'string'], default: null,",
+                      "  doc: 'ISO 4217 code of baseCurrencyAmount; null when no conversion was needed.' });",
+                      "pm.collectionVariables.set('m22AdditiveBody', JSON.stringify({ schema: JSON.stringify(v1) }));"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                      "pm.test('is_compatible = true', () => pm.expect(pm.response.json().is_compatible).to.eql(true));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "4.2 Register it: new version",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/vnd.schemaregistry.v1+json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{schemaRegistryUrl}}/subjects/{{m22Subject}}/versions",
+                  "host": [
+                    "{{schemaRegistryUrl}}"
+                  ],
+                  "path": [
+                    "subjects",
+                    "{{m22Subject}}",
+                    "versions"
+                  ]
+                },
+                "description": "What the next producer release's serializer would do on its first send.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{{m22AdditiveBody}}"
+                }
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// Version 1 as registered, plus an optional field with a default.",
+                      "const v1 = JSON.parse(pm.collectionVariables.get('m22SchemaV1'));",
+                      "v1.fields.push({ name: 'baseCurrency', type: ['null', 'string'], default: null,",
+                      "  doc: 'ISO 4217 code of baseCurrencyAmount; null when no conversion was needed.' });",
+                      "pm.collectionVariables.set('m22AdditiveBody', JSON.stringify({ schema: JSON.stringify(v1) }));"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                      "pm.test('schema id returned', () => pm.expect(pm.response.json().id).to.be.a('number'));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "4.3 One more version under the subject",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{schemaRegistryUrl}}/subjects/{{m22Subject}}/versions",
+                  "host": [
+                    "{{schemaRegistryUrl}}"
+                  ],
+                  "path": [
+                    "subjects",
+                    "{{m22Subject}}",
+                    "versions"
+                  ]
+                },
+                "description": "Records the new version number."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                      "const versions = pm.response.json();",
+                      "pm.test('one version added', () => pm.expect(versions.length).to.eql(Number(pm.collectionVariables.get('m22VersionCount')) + 1));",
+                      "pm.collectionVariables.set('m22AddedVersion', versions[versions.length - 1]);",
+                      "console.log('Added version', versions[versions.length - 1]);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "4.4 The running producer is unaffected: create another transaction",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/api/v1/transactions",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "transactions"
+                  ]
+                },
+                "description": "transaction-service still sends the older version; the registry still accepts it (it is registered), and consumers still read it. That is the point of FULL: both versions are live at once.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"userId\": \"{{userId}}\",\n  \"categoryId\": \"{{categoryId}}\",\n  \"amount\": 99,\n  \"type\": \"EXPENSE\",\n  \"description\": \"Milestone 22 after v2\",\n  \"transactionDate\": \"{{today}}\",\n  \"currency\": \"INR\"\n}"
+                }
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const now = new Date();",
+                      "pm.collectionVariables.set('today', now.toISOString().slice(0, 10));",
+                      "pm.collectionVariables.set('periodMonth', now.toISOString().slice(0, 7));"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('201 Created', () => pm.response.to.have.status(201));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "4.5 notification-service processed both events",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{notificationServiceUrl}}/actuator/metrics/spendwise.kafka.events.idempotency?tag=consumer:transaction-alerts&tag=outcome:processed",
+                  "host": [
+                    "{{notificationServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "spendwise.kafka.events.idempotency"
+                  ],
+                  "query": [
+                    {
+                      "key": "tag",
+                      "value": "consumer:transaction-alerts"
+                    },
+                    {
+                      "key": "tag",
+                      "value": "outcome:processed"
+                    }
+                  ]
+                },
+                "description": "notification-service processed both events."
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// Let the relay publish and the consumers read.",
+                      "setTimeout(() => {}, 8000);",
+                      "// Docker assigns notification-service a port from 18085-18088; find the live one.",
+                      "const ports = [18085, 18086, 18087, 18088];",
+                      "function probe(i) {",
+                      "  if (i >= ports.length) { console.warn('No notification-service replica answered on 18085-18088'); return; }",
+                      "  const base = 'http://localhost:' + ports[i];",
+                      "  pm.sendRequest({ url: base + '/actuator/health', method: 'GET' }, (err, res) => {",
+                      "    if (!err && res.code === 200) { pm.collectionVariables.set('notificationServiceUrl', base); }",
+                      "    else { probe(i + 1); }",
+                      "  });",
+                      "}",
+                      "probe(0);"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 404 = nothing counted yet for these tags: 0.",
+                      "const count = pm.response.code === 404 ? 0 : pm.response.json().measurements.find(m => m.statistic === 'COUNT').value;",
+                      "pm.test('metric endpoint answered (200, or 404 = zero so far)', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                      "const delta = count - Number(pm.collectionVariables.get('m22NotifProcessed') || 0);",
+                      "console.log('m22NotifProcessed delta =', delta);",
+                      "pm.test('notification-service processed both events (delta = 2)', () => pm.expect(delta).to.eql(2));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "4.6 analytics-service processed both events",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{analyticsServiceUrl}}/actuator/metrics/spendwise.kafka.events.idempotency?tag=consumer:transaction-ingestion&tag=outcome:processed",
+                  "host": [
+                    "{{analyticsServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "spendwise.kafka.events.idempotency"
+                  ],
+                  "query": [
+                    {
+                      "key": "tag",
+                      "value": "consumer:transaction-ingestion"
+                    },
+                    {
+                      "key": "tag",
+                      "value": "outcome:processed"
+                    }
+                  ]
+                },
+                "description": "analytics-service processed both events."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 404 = nothing counted yet for these tags: 0.",
+                      "const count = pm.response.code === 404 ? 0 : pm.response.json().measurements.find(m => m.statistic === 'COUNT').value;",
+                      "pm.test('metric endpoint answered (200, or 404 = zero so far)', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                      "const delta = count - Number(pm.collectionVariables.get('m22AnalyticsProcessed') || 0);",
+                      "console.log('m22AnalyticsProcessed delta =', delta);",
+                      "pm.test('analytics-service processed both events (delta = 2)', () => pm.expect(delta).to.eql(2));"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "5. Clean up: registry matches the code again",
+          "description": "Deletes the version folder 4 registered \u2014 soft delete, then permanent. Skip it to keep the version.",
+          "item": [
+            {
+              "name": "5.1 Soft-delete the added version",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{schemaRegistryUrl}}/subjects/{{m22Subject}}/versions/{{m22AddedVersion}}",
+                  "host": [
+                    "{{schemaRegistryUrl}}"
+                  ],
+                  "path": [
+                    "subjects",
+                    "{{m22Subject}}",
+                    "versions",
+                    "{{m22AddedVersion}}"
+                  ]
+                },
+                "description": "Hidden from lookups and compatibility checks; still recoverable."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                      "pm.test('returns the deleted version', () => pm.expect(pm.response.json()).to.eql(Number(pm.collectionVariables.get('m22AddedVersion'))));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "5.2 Permanently delete it",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{schemaRegistryUrl}}/subjects/{{m22Subject}}/versions/{{m22AddedVersion}}?permanent=true",
+                  "host": [
+                    "{{schemaRegistryUrl}}"
+                  ],
+                  "path": [
+                    "subjects",
+                    "{{m22Subject}}",
+                    "versions",
+                    "{{m22AddedVersion}}"
+                  ],
+                  "query": [
+                    {
+                      "key": "permanent",
+                      "value": "true"
+                    }
+                  ]
+                },
+                "description": "Only a soft-deleted version can be deleted permanently."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('200 OK', () => pm.response.to.have.status(200));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "5.3 Back to the original versions",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{schemaRegistryUrl}}/subjects/{{m22Subject}}/versions",
+                  "host": [
+                    "{{schemaRegistryUrl}}"
+                  ],
+                  "path": [
+                    "subjects",
+                    "{{m22Subject}}",
+                    "versions"
+                  ]
+                },
+                "description": "As before folder 3."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                      "pm.test('version count as before', () => pm.expect(pm.response.json().length).to.eql(Number(pm.collectionVariables.get('m22VersionCount'))));"
                     ]
                   }
                 }
