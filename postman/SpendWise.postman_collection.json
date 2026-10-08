@@ -165,6 +165,76 @@
       "key": "m19_analyticsDuplicate_afterCreate",
       "value": "",
       "description": "Milestone 19 test plan counter snapshot."
+    },
+    {
+      "key": "kafkaUiUrl",
+      "value": "http://localhost:8090",
+      "description": "Kafka UI (docker compose --profile tools up -d kafka-ui); its REST API is used by the Milestone 20 test plan."
+    },
+    {
+      "key": "m20DltBase",
+      "value": "",
+      "description": "Milestone 20: transaction-events.DLT partition 0 end offset before the poison pill."
+    },
+    {
+      "key": "m20NotifFailures",
+      "value": "",
+      "description": "Milestone 20 test plan baseline."
+    },
+    {
+      "key": "m20AnalyticsFailures",
+      "value": "",
+      "description": "Milestone 20 test plan baseline."
+    },
+    {
+      "key": "m20NotifDeadLettered",
+      "value": "",
+      "description": "Milestone 20 test plan baseline."
+    },
+    {
+      "key": "m20AnalyticsDeadLettered",
+      "value": "",
+      "description": "Milestone 20 test plan baseline."
+    },
+    {
+      "key": "m20NotifProcessed",
+      "value": "",
+      "description": "Milestone 20 test plan baseline."
+    },
+    {
+      "key": "m20AnalyticsProcessed",
+      "value": "",
+      "description": "Milestone 20 test plan baseline."
+    },
+    {
+      "key": "m20PoisonId",
+      "value": "",
+      "description": "Milestone 20 test plan: generated per run."
+    },
+    {
+      "key": "m20TxId",
+      "value": "",
+      "description": "Milestone 20 test plan: generated per run."
+    },
+    {
+      "key": "m20UserId",
+      "value": "",
+      "description": "Milestone 20 test plan: generated per run."
+    },
+    {
+      "key": "m20CategoryId",
+      "value": "",
+      "description": "Milestone 20 test plan: generated per run."
+    },
+    {
+      "key": "m20ValidId",
+      "value": "",
+      "description": "Milestone 20 test plan: generated per run."
+    },
+    {
+      "key": "m20CreatedAt",
+      "value": "",
+      "description": "Milestone 20 test plan: generated per run."
     }
   ],
   "item": [
@@ -4882,6 +4952,842 @@
                       "console.log('transaction-ingestion duplicate (afterDuplicate) =', count);",
                       "const delta = count - Number(pm.collectionVariables.get('m19_analyticsDuplicate_afterCreate') || 0);",
                       "pm.test('redelivered event recognised as a duplicate (delta = 1)', () => pm.expect(delta).to.eql(1));"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Milestone 20 - Test Plan",
+      "description": "Poison-pill chaos lab, driven entirely from Postman. Needs Kafka UI running (docker compose --profile tools up -d kafka-ui) \u2014 its REST API puts records on the topic. Run the folders in order, in the Collection Runner if you like (3.1 waits 12 s itself), with notification-service at one replica. 2.1 puts a malformed record on partition 0; 2.2 puts a valid record on the SAME partition, right behind it. Each consumer group must retry the poison 3 times, publish it to transaction-events.DLT, and then process the valid record \u2014 a poison pill delays a partition, it does not stop it.",
+      "item": [
+        {
+          "name": "1. Preconditions and baselines",
+          "description": "Kafka UI is writable, the DLT topic exists, and the current counts.",
+          "item": [
+            {
+              "name": "1.1 transaction-events.DLT exists (3 partitions, RF 3)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{kafkaUiUrl}}/api/clusters/spendwise/topics/transaction-events.DLT",
+                  "host": [
+                    "{{kafkaUiUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "clusters",
+                    "spendwise",
+                    "topics",
+                    "transaction-events.DLT"
+                  ]
+                },
+                "description": "Created by transaction-service's OutboxPublisher together with transaction-events. A 404 here means transaction-service has not restarted with Milestone 20 yet."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('200 OK - DLT topic exists', () => pm.response.to.have.status(200));",
+                      "if (pm.response.code !== 200) { return; }",
+                      "const t = pm.response.json();",
+                      "pm.test('3 partitions, same as transaction-events', () => pm.expect(t.partitionCount).to.eql(3));",
+                      "pm.test('replication factor 3', () => pm.expect(t.replicationFactor).to.eql(3));",
+                      "const p0 = t.partitions.find(p => p.partition === 0);",
+                      "pm.collectionVariables.set('m20DltBase', p0.offsetMax);",
+                      "console.log('DLT partition 0 end offset before:', p0.offsetMax);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "1.2 Baseline - notification-service consumed",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{notificationServiceUrl}}/actuator/metrics/spendwise.kafka.records.consumed?tag=group:notification-service&tag=outcome:failure",
+                  "host": [
+                    "{{notificationServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "spendwise.kafka.records.consumed"
+                  ],
+                  "query": [
+                    {
+                      "key": "tag",
+                      "value": "group:notification-service"
+                    },
+                    {
+                      "key": "tag",
+                      "value": "outcome:failure"
+                    }
+                  ]
+                },
+                "description": "Starting count."
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// Docker assigns notification-service a port from 18085-18088; find the live one.",
+                      "const ports = [18085, 18086, 18087, 18088];",
+                      "function probe(i) {",
+                      "  if (i >= ports.length) { console.warn('No notification-service replica answered on 18085-18088'); return; }",
+                      "  const base = 'http://localhost:' + ports[i];",
+                      "  pm.sendRequest({ url: base + '/actuator/health', method: 'GET' }, (err, res) => {",
+                      "    if (!err && res.code === 200) { pm.collectionVariables.set('notificationServiceUrl', base); }",
+                      "    else { probe(i + 1); }",
+                      "  });",
+                      "}",
+                      "probe(0);"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 404 = nothing counted yet for these tags: 0.",
+                      "const count = pm.response.code === 404 ? 0 : pm.response.json().measurements.find(m => m.statistic === 'COUNT').value;",
+                      "pm.test('metric endpoint answered (200, or 404 = zero so far)', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                      "pm.collectionVariables.set('m20NotifFailures', count);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "1.3 Baseline - analytics-service consumed",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{analyticsServiceUrl}}/actuator/metrics/spendwise.kafka.records.consumed?tag=group:analytics-service&tag=outcome:failure",
+                  "host": [
+                    "{{analyticsServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "spendwise.kafka.records.consumed"
+                  ],
+                  "query": [
+                    {
+                      "key": "tag",
+                      "value": "group:analytics-service"
+                    },
+                    {
+                      "key": "tag",
+                      "value": "outcome:failure"
+                    }
+                  ]
+                },
+                "description": "Starting count."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 404 = nothing counted yet for these tags: 0.",
+                      "const count = pm.response.code === 404 ? 0 : pm.response.json().measurements.find(m => m.statistic === 'COUNT').value;",
+                      "pm.test('metric endpoint answered (200, or 404 = zero so far)', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                      "pm.collectionVariables.set('m20AnalyticsFailures', count);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "1.4 Baseline - notification-service deadlettered",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{notificationServiceUrl}}/actuator/metrics/spendwise.kafka.records.deadlettered?tag=group:notification-service",
+                  "host": [
+                    "{{notificationServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "spendwise.kafka.records.deadlettered"
+                  ],
+                  "query": [
+                    {
+                      "key": "tag",
+                      "value": "group:notification-service"
+                    }
+                  ]
+                },
+                "description": "Starting count."
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// Docker assigns notification-service a port from 18085-18088; find the live one.",
+                      "const ports = [18085, 18086, 18087, 18088];",
+                      "function probe(i) {",
+                      "  if (i >= ports.length) { console.warn('No notification-service replica answered on 18085-18088'); return; }",
+                      "  const base = 'http://localhost:' + ports[i];",
+                      "  pm.sendRequest({ url: base + '/actuator/health', method: 'GET' }, (err, res) => {",
+                      "    if (!err && res.code === 200) { pm.collectionVariables.set('notificationServiceUrl', base); }",
+                      "    else { probe(i + 1); }",
+                      "  });",
+                      "}",
+                      "probe(0);"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 404 = nothing counted yet for these tags: 0.",
+                      "const count = pm.response.code === 404 ? 0 : pm.response.json().measurements.find(m => m.statistic === 'COUNT').value;",
+                      "pm.test('metric endpoint answered (200, or 404 = zero so far)', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                      "pm.collectionVariables.set('m20NotifDeadLettered', count);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "1.5 Baseline - analytics-service deadlettered",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{analyticsServiceUrl}}/actuator/metrics/spendwise.kafka.records.deadlettered?tag=group:analytics-service",
+                  "host": [
+                    "{{analyticsServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "spendwise.kafka.records.deadlettered"
+                  ],
+                  "query": [
+                    {
+                      "key": "tag",
+                      "value": "group:analytics-service"
+                    }
+                  ]
+                },
+                "description": "Starting count."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 404 = nothing counted yet for these tags: 0.",
+                      "const count = pm.response.code === 404 ? 0 : pm.response.json().measurements.find(m => m.statistic === 'COUNT').value;",
+                      "pm.test('metric endpoint answered (200, or 404 = zero so far)', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                      "pm.collectionVariables.set('m20AnalyticsDeadLettered', count);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "1.6 Baseline - notification-service idempotency",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{notificationServiceUrl}}/actuator/metrics/spendwise.kafka.events.idempotency?tag=consumer:transaction-alerts&tag=outcome:processed",
+                  "host": [
+                    "{{notificationServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "spendwise.kafka.events.idempotency"
+                  ],
+                  "query": [
+                    {
+                      "key": "tag",
+                      "value": "consumer:transaction-alerts"
+                    },
+                    {
+                      "key": "tag",
+                      "value": "outcome:processed"
+                    }
+                  ]
+                },
+                "description": "Starting count."
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// Docker assigns notification-service a port from 18085-18088; find the live one.",
+                      "const ports = [18085, 18086, 18087, 18088];",
+                      "function probe(i) {",
+                      "  if (i >= ports.length) { console.warn('No notification-service replica answered on 18085-18088'); return; }",
+                      "  const base = 'http://localhost:' + ports[i];",
+                      "  pm.sendRequest({ url: base + '/actuator/health', method: 'GET' }, (err, res) => {",
+                      "    if (!err && res.code === 200) { pm.collectionVariables.set('notificationServiceUrl', base); }",
+                      "    else { probe(i + 1); }",
+                      "  });",
+                      "}",
+                      "probe(0);"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 404 = nothing counted yet for these tags: 0.",
+                      "const count = pm.response.code === 404 ? 0 : pm.response.json().measurements.find(m => m.statistic === 'COUNT').value;",
+                      "pm.test('metric endpoint answered (200, or 404 = zero so far)', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                      "pm.collectionVariables.set('m20NotifProcessed', count);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "1.7 Baseline - analytics-service idempotency",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{analyticsServiceUrl}}/actuator/metrics/spendwise.kafka.events.idempotency?tag=consumer:transaction-ingestion&tag=outcome:processed",
+                  "host": [
+                    "{{analyticsServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "spendwise.kafka.events.idempotency"
+                  ],
+                  "query": [
+                    {
+                      "key": "tag",
+                      "value": "consumer:transaction-ingestion"
+                    },
+                    {
+                      "key": "tag",
+                      "value": "outcome:processed"
+                    }
+                  ]
+                },
+                "description": "Starting count."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 404 = nothing counted yet for these tags: 0.",
+                      "const count = pm.response.code === 404 ? 0 : pm.response.json().measurements.find(m => m.statistic === 'COUNT').value;",
+                      "pm.test('metric endpoint answered (200, or 404 = zero so far)', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                      "pm.collectionVariables.set('m20AnalyticsProcessed', count);"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "2. Inject a poison pill, then a valid record behind it",
+          "description": "Both on partition 0 of transaction-events, through Kafka UI's API (the same as Topics > transaction-events > Produce Message in the UI).",
+          "item": [
+            {
+              "name": "2.1 Produce the poison pill (malformed payload, partition 0)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{kafkaUiUrl}}/api/clusters/spendwise/topics/transaction-events/messages",
+                  "host": [
+                    "{{kafkaUiUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "clusters",
+                    "spendwise",
+                    "topics",
+                    "transaction-events",
+                    "messages"
+                  ]
+                },
+                "description": "eventType says TransactionCreatedEvent, so both listeners try to parse it \u2014 and fail.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"partition\": 0,\n  \"key\": \"poison-{{m20PoisonId}}\",\n  \"value\": \"{ this is not JSON -- a corrupted TransactionCreatedEvent\",\n  \"keySerde\": \"String\",\n  \"valueSerde\": \"String\",\n  \"headers\": {\n    \"eventType\": \"TransactionCreatedEvent\",\n    \"aggregateType\": \"Transaction\",\n    \"outboxEventId\": \"{{m20PoisonId}}\",\n    \"X-Correlation-ID\": \"m20-poison-{{m20PoisonId}}\"\n  }\n}"
+                }
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.collectionVariables.set('m20PoisonId', pm.variables.replaceIn('{{$guid}}'));"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('200 OK - record produced', () => pm.response.to.have.status(200));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "2.2 Produce a valid TransactionCreatedEvent behind it (partition 0)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{kafkaUiUrl}}/api/clusters/spendwise/topics/transaction-events/messages",
+                  "host": [
+                    "{{kafkaUiUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "clusters",
+                    "spendwise",
+                    "topics",
+                    "transaction-events",
+                    "messages"
+                  ]
+                },
+                "description": "A well-formed event with a fresh outboxEventId. It sits after the poison on the same partition, so it can only be processed once the poison has been moved aside.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"partition\": 0,\n  \"key\": \"{{m20TxId}}\",\n  \"value\": \"{\\\"transactionId\\\":\\\"{{m20TxId}}\\\",\\\"userId\\\":\\\"{{m20UserId}}\\\",\\\"categoryId\\\":\\\"{{m20CategoryId}}\\\",\\\"amount\\\":75.5,\\\"type\\\":\\\"EXPENSE\\\",\\\"transactionDate\\\":\\\"{{today}}\\\",\\\"currency\\\":\\\"INR\\\",\\\"baseCurrencyAmount\\\":null,\\\"createdAt\\\":\\\"{{m20CreatedAt}}\\\"}\",\n  \"keySerde\": \"String\",\n  \"valueSerde\": \"String\",\n  \"headers\": {\n    \"eventType\": \"TransactionCreatedEvent\",\n    \"aggregateType\": \"Transaction\",\n    \"outboxEventId\": \"{{m20ValidId}}\",\n    \"X-Correlation-ID\": \"m20-valid-{{m20ValidId}}\"\n  }\n}"
+                }
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const g = () => pm.variables.replaceIn('{{$guid}}');",
+                      "pm.collectionVariables.set('m20TxId', g());",
+                      "pm.collectionVariables.set('m20UserId', g());",
+                      "pm.collectionVariables.set('m20CategoryId', g());",
+                      "pm.collectionVariables.set('m20ValidId', g());",
+                      "pm.collectionVariables.set('today', new Date().toISOString().slice(0, 10));",
+                      "pm.collectionVariables.set('m20CreatedAt', new Date().toISOString());"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('200 OK - record produced', () => pm.response.to.have.status(200));"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "3. Retried, dead-lettered, partition kept moving",
+          "description": "3.1 waits 12 s first. Then: 4 failed attempts and 1 dead-letter per consumer group, the valid record processed by each, and two copies of the poison on transaction-events.DLT partition 0 (one per group). In Kafka UI > Topics > transaction-events.DLT > Messages, open either copy: headers kafka_dlt-original-topic/-partition/-offset, kafka_dlt-original-consumer-group, kafka_dlt-exception-message (the parse error), plus the original X-Correlation-ID m20-poison-....",
+          "item": [
+            {
+              "name": "3.1 notification-service: poison attempted 4 times (1 + 3 retries)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{notificationServiceUrl}}/actuator/metrics/spendwise.kafka.records.consumed?tag=group:notification-service&tag=outcome:failure",
+                  "host": [
+                    "{{notificationServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "spendwise.kafka.records.consumed"
+                  ],
+                  "query": [
+                    {
+                      "key": "tag",
+                      "value": "group:notification-service"
+                    },
+                    {
+                      "key": "tag",
+                      "value": "outcome:failure"
+                    }
+                  ]
+                },
+                "description": "notification-service: poison attempted 4 times (1 + 3 retries)."
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 4 attempts 1 s apart, then the dead-letter publish, then the valid record",
+                      "// behind it: give both consumers time before reading anything.",
+                      "setTimeout(() => {}, 12000);",
+                      "// Docker assigns notification-service a port from 18085-18088; find the live one.",
+                      "const ports = [18085, 18086, 18087, 18088];",
+                      "function probe(i) {",
+                      "  if (i >= ports.length) { console.warn('No notification-service replica answered on 18085-18088'); return; }",
+                      "  const base = 'http://localhost:' + ports[i];",
+                      "  pm.sendRequest({ url: base + '/actuator/health', method: 'GET' }, (err, res) => {",
+                      "    if (!err && res.code === 200) { pm.collectionVariables.set('notificationServiceUrl', base); }",
+                      "    else { probe(i + 1); }",
+                      "  });",
+                      "}",
+                      "probe(0);"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 404 = nothing counted yet for these tags: 0.",
+                      "const count = pm.response.code === 404 ? 0 : pm.response.json().measurements.find(m => m.statistic === 'COUNT').value;",
+                      "pm.test('metric endpoint answered (200, or 404 = zero so far)', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                      "const delta = count - Number(pm.collectionVariables.get('m20NotifFailures') || 0);",
+                      "console.log('m20NotifFailures delta =', delta);",
+                      "pm.test('notification-service: poison attempted 4 times (1 + 3 retries) (delta = 4)', () => pm.expect(delta).to.eql(4));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "3.2 analytics-service: poison attempted 4 times (1 + 3 retries)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{analyticsServiceUrl}}/actuator/metrics/spendwise.kafka.records.consumed?tag=group:analytics-service&tag=outcome:failure",
+                  "host": [
+                    "{{analyticsServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "spendwise.kafka.records.consumed"
+                  ],
+                  "query": [
+                    {
+                      "key": "tag",
+                      "value": "group:analytics-service"
+                    },
+                    {
+                      "key": "tag",
+                      "value": "outcome:failure"
+                    }
+                  ]
+                },
+                "description": "analytics-service: poison attempted 4 times (1 + 3 retries)."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 404 = nothing counted yet for these tags: 0.",
+                      "const count = pm.response.code === 404 ? 0 : pm.response.json().measurements.find(m => m.statistic === 'COUNT').value;",
+                      "pm.test('metric endpoint answered (200, or 404 = zero so far)', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                      "const delta = count - Number(pm.collectionVariables.get('m20AnalyticsFailures') || 0);",
+                      "console.log('m20AnalyticsFailures delta =', delta);",
+                      "pm.test('analytics-service: poison attempted 4 times (1 + 3 retries) (delta = 4)', () => pm.expect(delta).to.eql(4));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "3.3 notification-service: poison dead-lettered once",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{notificationServiceUrl}}/actuator/metrics/spendwise.kafka.records.deadlettered?tag=group:notification-service",
+                  "host": [
+                    "{{notificationServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "spendwise.kafka.records.deadlettered"
+                  ],
+                  "query": [
+                    {
+                      "key": "tag",
+                      "value": "group:notification-service"
+                    }
+                  ]
+                },
+                "description": "notification-service: poison dead-lettered once."
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// Docker assigns notification-service a port from 18085-18088; find the live one.",
+                      "const ports = [18085, 18086, 18087, 18088];",
+                      "function probe(i) {",
+                      "  if (i >= ports.length) { console.warn('No notification-service replica answered on 18085-18088'); return; }",
+                      "  const base = 'http://localhost:' + ports[i];",
+                      "  pm.sendRequest({ url: base + '/actuator/health', method: 'GET' }, (err, res) => {",
+                      "    if (!err && res.code === 200) { pm.collectionVariables.set('notificationServiceUrl', base); }",
+                      "    else { probe(i + 1); }",
+                      "  });",
+                      "}",
+                      "probe(0);"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 404 = nothing counted yet for these tags: 0.",
+                      "const count = pm.response.code === 404 ? 0 : pm.response.json().measurements.find(m => m.statistic === 'COUNT').value;",
+                      "pm.test('metric endpoint answered (200, or 404 = zero so far)', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                      "const delta = count - Number(pm.collectionVariables.get('m20NotifDeadLettered') || 0);",
+                      "console.log('m20NotifDeadLettered delta =', delta);",
+                      "pm.test('notification-service: poison dead-lettered once (delta = 1)', () => pm.expect(delta).to.eql(1));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "3.4 analytics-service: poison dead-lettered once",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{analyticsServiceUrl}}/actuator/metrics/spendwise.kafka.records.deadlettered?tag=group:analytics-service",
+                  "host": [
+                    "{{analyticsServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "spendwise.kafka.records.deadlettered"
+                  ],
+                  "query": [
+                    {
+                      "key": "tag",
+                      "value": "group:analytics-service"
+                    }
+                  ]
+                },
+                "description": "analytics-service: poison dead-lettered once."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 404 = nothing counted yet for these tags: 0.",
+                      "const count = pm.response.code === 404 ? 0 : pm.response.json().measurements.find(m => m.statistic === 'COUNT').value;",
+                      "pm.test('metric endpoint answered (200, or 404 = zero so far)', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                      "const delta = count - Number(pm.collectionVariables.get('m20AnalyticsDeadLettered') || 0);",
+                      "console.log('m20AnalyticsDeadLettered delta =', delta);",
+                      "pm.test('analytics-service: poison dead-lettered once (delta = 1)', () => pm.expect(delta).to.eql(1));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "3.5 notification-service: the valid record BEHIND the poison was processed (partition not halted)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{notificationServiceUrl}}/actuator/metrics/spendwise.kafka.events.idempotency?tag=consumer:transaction-alerts&tag=outcome:processed",
+                  "host": [
+                    "{{notificationServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "spendwise.kafka.events.idempotency"
+                  ],
+                  "query": [
+                    {
+                      "key": "tag",
+                      "value": "consumer:transaction-alerts"
+                    },
+                    {
+                      "key": "tag",
+                      "value": "outcome:processed"
+                    }
+                  ]
+                },
+                "description": "notification-service: the valid record BEHIND the poison was processed (partition not halted)."
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// Docker assigns notification-service a port from 18085-18088; find the live one.",
+                      "const ports = [18085, 18086, 18087, 18088];",
+                      "function probe(i) {",
+                      "  if (i >= ports.length) { console.warn('No notification-service replica answered on 18085-18088'); return; }",
+                      "  const base = 'http://localhost:' + ports[i];",
+                      "  pm.sendRequest({ url: base + '/actuator/health', method: 'GET' }, (err, res) => {",
+                      "    if (!err && res.code === 200) { pm.collectionVariables.set('notificationServiceUrl', base); }",
+                      "    else { probe(i + 1); }",
+                      "  });",
+                      "}",
+                      "probe(0);"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 404 = nothing counted yet for these tags: 0.",
+                      "const count = pm.response.code === 404 ? 0 : pm.response.json().measurements.find(m => m.statistic === 'COUNT').value;",
+                      "pm.test('metric endpoint answered (200, or 404 = zero so far)', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                      "const delta = count - Number(pm.collectionVariables.get('m20NotifProcessed') || 0);",
+                      "console.log('m20NotifProcessed delta =', delta);",
+                      "pm.test('notification-service: the valid record BEHIND the poison was processed (partition not halted) (delta = 1)', () => pm.expect(delta).to.eql(1));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "3.6 analytics-service: the valid record BEHIND the poison was processed (partition not halted)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{analyticsServiceUrl}}/actuator/metrics/spendwise.kafka.events.idempotency?tag=consumer:transaction-ingestion&tag=outcome:processed",
+                  "host": [
+                    "{{analyticsServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "metrics",
+                    "spendwise.kafka.events.idempotency"
+                  ],
+                  "query": [
+                    {
+                      "key": "tag",
+                      "value": "consumer:transaction-ingestion"
+                    },
+                    {
+                      "key": "tag",
+                      "value": "outcome:processed"
+                    }
+                  ]
+                },
+                "description": "analytics-service: the valid record BEHIND the poison was processed (partition not halted)."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// 404 = nothing counted yet for these tags: 0.",
+                      "const count = pm.response.code === 404 ? 0 : pm.response.json().measurements.find(m => m.statistic === 'COUNT').value;",
+                      "pm.test('metric endpoint answered (200, or 404 = zero so far)', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                      "const delta = count - Number(pm.collectionVariables.get('m20AnalyticsProcessed') || 0);",
+                      "console.log('m20AnalyticsProcessed delta =', delta);",
+                      "pm.test('analytics-service: the valid record BEHIND the poison was processed (partition not halted) (delta = 1)', () => pm.expect(delta).to.eql(1));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "3.7 Two copies of the poison on transaction-events.DLT partition 0",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{kafkaUiUrl}}/api/clusters/spendwise/topics/transaction-events.DLT",
+                  "host": [
+                    "{{kafkaUiUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "clusters",
+                    "spendwise",
+                    "topics",
+                    "transaction-events.DLT"
+                  ]
+                },
+                "description": "One per consumer group, on the same partition number the poison came from."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                      "const p0 = pm.response.json().partitions.find(p => p.partition === 0);",
+                      "const delta = p0.offsetMax - Number(pm.collectionVariables.get('m20DltBase'));",
+                      "console.log('DLT partition 0 new records:', delta);",
+                      "pm.test('2 new DLT records on partition 0 (notification-service + analytics-service)', () => pm.expect(delta).to.eql(2));"
                     ]
                   }
                 }

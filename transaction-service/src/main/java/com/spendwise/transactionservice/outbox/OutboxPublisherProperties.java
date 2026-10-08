@@ -22,6 +22,10 @@ import java.time.Duration;
  *                           "acknowledged" the publisher waits for
  * @param sendTimeout        upper bound on waiting for one acknowledgment before
  *                           the batch stops and the row is retried next poll
+ * @param deadLetterRetention Milestone 20 — retention of {@code <topic>.DLT}, which
+ *                           is created alongside the main topic; longer than the
+ *                           main topic's, since dead-lettered records wait for an
+ *                           operator to inspect and replay them
  */
 @ConfigurationProperties("spendwise.outbox.publisher")
 public record OutboxPublisherProperties(
@@ -30,5 +34,6 @@ public record OutboxPublisherProperties(
         @DefaultValue("3") int partitions,
         @DefaultValue("3") short replicationFactor,
         @DefaultValue("2") int minInSyncReplicas,
-        @DefaultValue("10s") Duration sendTimeout) {
+        @DefaultValue("10s") Duration sendTimeout,
+        @DefaultValue("30d") Duration deadLetterRetention) {
 }

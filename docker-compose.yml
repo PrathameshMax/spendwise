@@ -164,18 +164,24 @@ services:
   # with their headers, consumer groups), used by the Postman validation plan
   # in place of Kafka CLI commands. Behind the "tools" profile, so a plain
   # `docker compose up -d` does not start it; start it with
-  # `docker compose --profile tools up -d kafka-ui`. Read-only: dynamic
-  # config editing is left off.
+  # `docker compose --profile tools up -d kafka-ui`. Dynamic config editing
+  # is left off.
+  # Milestone 20 — no longer read-only: the poison-pill chaos lab produces a
+  # malformed record onto transaction-events through this UI (or its REST API,
+  # which the Postman test plan calls). A local dev tool with no auth, so its
+  # port is published on 127.0.0.1 only; never expose it like this elsewhere.
   kafka-ui:
     image: ghcr.io/kafbat/kafka-ui:v1.4.2
     container_name: spendwise-kafka-ui
     profiles: ["tools"]
     ports:
-      - "8090:8080"
+      # Milestone 20 — bound to loopback: the UI is writable and has no auth,
+      # so it must not be reachable from other machines on the network.
+      - "127.0.0.1:8090:8080"
     environment:
       KAFKA_CLUSTERS_0_NAME: spendwise
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka-1:19092,kafka-2:19092,kafka-3:19092
-      KAFKA_CLUSTERS_0_READONLY: "true"
+      KAFKA_CLUSTERS_0_READONLY: "false"
     depends_on:
       kafka-1:
         condition: service_healthy

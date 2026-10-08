@@ -45,9 +45,10 @@ import java.nio.charset.StandardCharsets;
  * this topic are skipped, so a future event (Milestone 21's
  * {@code TransactionReversedEvent}) cannot be mis-read as a new transaction.
  *
- * <p>A payload that cannot be parsed is rethrown: Spring Kafka's default error
- * handler retries it and then logs and skips it. Routing such records to a
- * dead-letter topic instead is Milestone 20.
+ * <p>A payload that cannot be parsed is rethrown. The platform's error handler
+ * (Milestone 20, spendwise-common) retries it 3 times, 1 s apart, then
+ * publishes it to {@code transaction-events.DLT} and moves on to the next
+ * record in the partition.
  */
 @Component
 public class TransactionAlertListener {

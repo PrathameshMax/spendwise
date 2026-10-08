@@ -55,6 +55,9 @@ spendwise:
       replication-factor: 3
       min-in-sync-replicas: 2
       send-timeout: 10s
+      # Milestone 20 — transaction-events.DLT is created together with the main
+      # topic (same partitions/replication) and keeps records for 30 days.
+      dead-letter-retention: 30d
 
 management:
   endpoint:

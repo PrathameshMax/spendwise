@@ -51,6 +51,11 @@ import java.time.YearMonth;
  * non-blocking threads. The timeout turns a hung database into a listener
  * failure (retried by the error handler) instead of a consumer stalled
  * forever, and stays well under {@code max.poll.interval.ms} (5 minutes).
+ *
+ * <p>Any failure here — an unparseable payload, a timed-out ingest — is
+ * rethrown to the platform's error handler (Milestone 20, spendwise-common):
+ * retried 3 times, 1 s apart, then published to {@code transaction-events.DLT},
+ * after which the partition moves on.
  */
 @Component
 public class TransactionIngestionListener {

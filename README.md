@@ -2278,7 +2278,172 @@ After folder 5:
   matching pair: one `Read-side ingest` line, then one `Duplicate delivery`
   line.
 
-Next: Milestone 20 — Fault-Isolating Stream Boundaries (Dead Letter Topics).
+**Milestone 20 complete** — Fault-Isolating Stream Boundaries (Dead Letter
+Topics). Scoped to the roadmap's sentence: a Spring Kafka `DefaultErrorHandler`
+paired with a `DeadLetterPublishingRecoverer` that routes records which can't
+be processed to a secondary `.DLT` topic after a bounded number of retries.
+Plus the chaos lab: a malformed payload on a partition is retried 3 times,
+then isolated in the DLT without stopping the rest of that partition. No
+fixes were raised validating Milestone 19.
+
+**What was there before.** Since Milestone 18, a listener exception fell
+through to Spring Kafka's default error handler. That handler retries 9
+times, then logs the record and *skips* it. So a poison pill never blocked a
+partition, but the record was simply gone: logged once, offset committed
+past it, unrecoverable. This milestone keeps a retry bound and *parks* the
+record instead of dropping it.
+
+**`DeadLetterTopics`** (new, `spendwise-common/.../messaging`) — the
+`<topic>.DLT` naming rule, shared by whoever creates the topic and whoever
+writes to it. It is explicit because spring-kafka 3.3's
+`DeadLetterPublishingRecoverer` defaults to `topic + "-dlt"`, checked in its
+source, even though its own Javadoc still says `.DLT`. The brokers have topic
+auto-creation off, so relying on that default wouldn't have created a stray
+topic: every dead-letter publish would have failed, and the poison record
+would have been retried forever.
+
+**`KafkaErrorHandlingProperties`** (new, spendwise-common) —
+`spendwise.kafka.error-handling.max-retries` (3) and `.retry-interval` (1s),
+set once in `config-repo/application.yml`. The interval is fixed rather than
+exponential: the failures worth retrying (a database blip, a lock timeout)
+clear in about a second, and the partition waits while retries run, so the
+total has to stay short.
+
+**`MeteredDeadLetterRecoverer`** (new, spendwise-common) — runs once retries
+are exhausted.
+- It delegates to `DeadLetterPublishingRecoverer`, which writes the original
+  key, value and headers (`X-Correlation-ID`, `outboxEventId`) to the *same
+  partition number* of `<topic>.DLT`, and adds `kafka_dlt-*` headers: the
+  original topic, partition, offset, timestamp and consumer group, and the
+  exception class, message and stack trace. That is everything an operator
+  needs to diagnose and replay it.
+- It then logs a WARN line, which carries the poison's correlation id, and
+  counts `spendwise.kafka.records.deadlettered{group, topic}` — only after
+  the publish succeeded.
+- If the publish fails, the exception propagates and the record is
+  redelivered. A record is never acknowledged without having been either
+  processed or safely parked.
+- Each consumer group dead-letters on its own, so a record that is poison to
+  both consumers lands in the DLT twice, told apart by
+  `kafka_dlt-original-consumer-group`. That's correct: each group failed it,
+  and each may replay its own copy.
+
+**`SpendwiseKafkaConsumerAutoConfiguration`** (modified) — adds the platform's
+single `CommonErrorHandler` bean. It is a `DefaultErrorHandler(recoverer,
+FixedBackOff(1s, 3))` whose destination resolver uses `DeadLetterTopics`.
+Boot applies a unique `CommonErrorHandler` bean to its listener container
+factory, as it does the Milestone 18 interceptor. The recoverer publishes
+through Boot's auto-configured `KafkaTemplate`, whose String serializers match
+the listeners' String deserializers, so the parked value is byte-for-byte what
+was consumed. Exceptions that can never succeed — the handler's built-in list
+of deserialization and conversion failures, `ClassCastException`, and so on —
+skip the retries.
+
+**`OutboxPublisher`** / **`OutboxPublisherProperties`** (modified,
+transaction-service) — `transaction-events.DLT` is created in the same
+`createOrModifyTopics` call as `transaction-events`.
+- Same partition count, replication and `min.insync.replicas`: the recoverer
+  writes to the *same partition number*. With fewer DLT partitions it would
+  log a warning and let the producer pick one, losing the
+  original-partition mapping.
+- Retention is 30 days (`dead-letter-retention`), against the broker default
+  of 7, because parked records wait for a person.
+- Nothing reaches the main topic before this call succeeds, so the DLT
+  always exists before anything needs it.
+- The topic is created when transaction-service restarts with this
+  milestone.
+
+**`docker-compose.yml`** — Kafka UI is no longer read-only. The chaos lab
+puts its records on the topic through Kafka UI's REST API (the Postman plan)
+or its Produce Message screen. It's a local dev tool with no auth, published
+only on this machine.
+
+**Q61: How do Dead Letter Topics protect processing velocity from "poison
+pills"?** A partition is an ordered log consumed by one member of each group,
+and the committed offset only moves forward past records that were handled.
+So one record that always fails stops everything behind it in its partition —
+real, valid events from other users included — for as long as the consumer
+keeps retrying it.
+
+Infinite retry turns one bad record into an outage of a third of the topic.
+Skip-and-log keeps the partition moving but loses the record. A DLT does
+both jobs:
+- **Bounded retries** absorb transient failures. The bound caps what one
+  record can cost: here about 3 s of delay for the records behind it.
+- **Parking the record** on a side topic with its full context (where it was,
+  why it failed) lets the offset advance and the partition carry on at full
+  speed.
+- **Nothing is lost.** The DLT is itself a durable, replicated, retained log.
+  Once the cause is fixed, its records can be replayed onto the main topic,
+  and Milestone 19's idempotency guard makes that replay safe.
+
+Operationally:
+- A DLT needs an owner. Alert on `spendwise.kafka.records.deadlettered`, and
+  its retention has to outlast the time it takes someone to look.
+- Classify exceptions. A deterministic failure, like a payload that will
+  never parse, can be marked non-retryable
+  (`DefaultErrorHandler.addNotRetryableExceptions`) so it goes straight to
+  the DLT without the delay. This milestone deliberately leaves parse errors
+  retryable, so the chaos lab shows the retry bound working.
+- Long or non-blocking retries belong to Spring Kafka's retry-topic pattern
+  (`@RetryableTopic`), which moves the record to delay topics rather than
+  holding the partition.
+
+### Validating Milestone 20
+
+As with Milestones 17–19, the authoring sandbox couldn't compile or run this,
+so step 0 is the first real build. What was checked there:
+- all YAML/XML/JSON parses, and `docker compose config` passes;
+- every spring-kafka 3.3.1 API used was read in source, including the `-dlt`
+  default and `ConsumerAwareRecordRecoverer`;
+- the Kafka UI v1.4.2 REST calls were checked against its OpenAPI contract;
+- the Postman bodies were checked by substituting values: the valid event
+  parses into exactly the fields both consumers read, and the poison really
+  is malformed JSON.
+
+**Step 0 — build and start (Git Bash).** transaction-service must restart
+for the DLT topic to be created.
+```bash
+cd /d/spendwise
+./mvnw clean test-compile
+docker compose up -d --build
+docker compose --profile tools up -d kafka-ui
+docker compose logs transaction-service | grep "transaction-events.DLT ready"
+```
+The last command should print the line in which `transaction-events` and
+`transaction-events.DLT` are reported ready together. Kafka UI → Topics
+should now list `transaction-events.DLT`: 3 partitions, replication factor 3.
+
+**Steps 1–3 — Postman, folder `Milestone 20 - Test Plan`** (re-import the
+collection; new variable `kafkaUiUrl` = `http://localhost:8090`). Every step,
+including putting records on the topic, is a Postman request, so the whole
+folder can run in the Collection Runner. 3.1 waits 12 s by itself. Keep
+notification-service at one replica.
+
+| Folder | What it proves | Expected |
+| --- | --- | --- |
+| 1. Preconditions and baselines | DLT provisioned; starting counts | `transaction-events.DLT` `200`, 3 partitions, RF 3; metric baselines `200`/`404` |
+| 2. Inject | a poison pill, then a valid record behind it, both on partition 0 | both `200` from Kafka UI's API |
+| 3. Verify | retried 3 times, parked, partition kept moving | per consumer group: `consumed{outcome=failure}` +4 (1 + 3 retries), `deadlettered` +1, valid record `processed` +1; DLT partition 0 +2 records (one per group) |
+
+**In Kafka UI**, Topics → `transaction-events.DLT` → Messages → open a copy.
+Expect `kafka_dlt-original-topic: transaction-events`,
+`kafka_dlt-original-partition: 0`, `kafka_dlt-original-offset`,
+`kafka_dlt-original-consumer-group` (`notification-service` on one copy,
+`analytics-service` on the other), `kafka_dlt-exception-message` (the parse
+error), and the original `X-Correlation-ID: m20-poison-…`.
+
+**In the logs**, `docker compose logs notification-service | grep m20-`
+shows, under the poison's correlation id `m20-poison-…`, the line
+`Retries exhausted for transaction-events-0@… (group notification-service);
+record published to transaction-events.DLT: JsonParseException: Unexpected character …`
+(the root cause; the listener wraps it in an `IllegalArgumentException`).
+Right after it comes the valid record's `[SIMULATED PUSH]`, under
+`m20-valid-…`. Spring Kafka also logs the listener failure itself; how many
+of those lines appear depends on its log levels. The attempt count is
+asserted by the `consumed{outcome=failure}` metric (+4), not by log lines.
+
+Next: Milestone 21 — Distributed Business Flows (Choreographed SAGA Pattern).
 
 ## API Versioning & Deprecation Policy
 

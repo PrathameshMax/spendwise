@@ -1,5 +1,6 @@
 package com.spendwise.transactionservice.outbox;
 
+import com.spendwise.common.messaging.DeadLetterTopics;
 import com.spendwise.common.messaging.EventHeaders;
 import com.spendwise.common.tracing.CorrelationIdConstants;
 import com.spendwise.transactionservice.domain.OutboxEvent;
@@ -63,6 +64,18 @@ import java.util.concurrent.TimeoutException;
  * across all three partitions — the parallelism Milestone 18's consumer
  * groups scale against.
  *
+ * <p><b>Dead-letter topic (Milestone 20).</b> {@code transaction-events.DLT}
+ * is provisioned here, in the same call and with the same partition count and
+ * replication as the main topic. Consumers' dead-letter recoverers publish a
+ * failed record to the <em>same partition number</em> in the DLT, so the DLT
+ * must have at least as many partitions; creating both in one place keeps the
+ * two from drifting. Because no record reaches the main topic before this call
+ * succeeds, the DLT always exists before anything can need it — and brokers
+ * have auto-creation disabled, so nothing else would create it. Its retention
+ * is longer than the main topic's (default 30 days vs. the broker's 7):
+ * dead-lettered records wait for a human, who needs time to diagnose and
+ * replay them.
+ *
  * <p><b>Topic provisioning is lazy, not a startup dependency.</b> The topic
  * is created (or its partition count raised) on the first poll that can
  * reach the cluster, not at application start. transaction-service must keep
@@ -82,6 +95,7 @@ public class OutboxPublisher {
     private final TransactionTemplate transactionTemplate;
     private final OutboxPublisherProperties properties;
     private final NewTopic topic;
+    private final NewTopic deadLetterTopic;
 
     private volatile boolean topicReady;
 
@@ -99,6 +113,12 @@ public class OutboxPublisher {
                 .partitions(properties.partitions())
                 .replicas(properties.replicationFactor())
                 .config(TopicConfig.MIN_IN_SYNC_REPLICAS_CONFIG, String.valueOf(properties.minInSyncReplicas()))
+                .build();
+        this.deadLetterTopic = TopicBuilder.name(DeadLetterTopics.of(properties.topic()))
+                .partitions(properties.partitions())
+                .replicas(properties.replicationFactor())
+                .config(TopicConfig.MIN_IN_SYNC_REPLICAS_CONFIG, String.valueOf(properties.minInSyncReplicas()))
+                .config(TopicConfig.RETENTION_MS_CONFIG, String.valueOf(properties.deadLetterRetention().toMillis()))
                 .build();
     }
 
@@ -119,11 +139,11 @@ public class OutboxPublisher {
             return true;
         }
         try {
-            kafkaAdmin.createOrModifyTopics(topic);
+            kafkaAdmin.createOrModifyTopics(topic, deadLetterTopic);
             topicReady = true;
-            log.info("Topic {} ready ({} partitions, replication factor {}, min.insync.replicas {})",
-                    properties.topic(), properties.partitions(), properties.replicationFactor(),
-                    properties.minInSyncReplicas());
+            log.info("Topics {} and {} ready ({} partitions, replication factor {}, min.insync.replicas {})",
+                    properties.topic(), deadLetterTopic.name(), properties.partitions(),
+                    properties.replicationFactor(), properties.minInSyncReplicas());
             return true;
         } catch (RuntimeException ex) {
             log.warn("Kafka cluster unreachable, outbox rows will accumulate until it recovers: {}",

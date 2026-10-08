@@ -182,6 +182,12 @@ spendwise:
   kafka:
     topics:
       transaction-events: transaction-events
+    # Milestone 20 — every listener's bounded retry policy before a failed
+    # record is published to <topic>.DLT (SpendwiseKafkaConsumerAutoConfiguration).
+    # 3 retries x 1s: a poison record holds its partition for ~3s, then moves aside.
+    error-handling:
+      max-retries: 3
+      retry-interval: 1s
   security:
     # Shared only between the API Gateway (signs) and business services (verify) —
     # HMAC key for the X-User-Context header (Milestone 6). Override via env var
