@@ -1,0 +1,12 @@
+# Production Debugging Lab — loaded only when transaction-service runs with
+# the "lab" profile (docker-compose.lab.yml sets SPRING_PROFILES_ACTIVE=prod,lab).
+# The "lab" profile is what activates the /lab/seed test-data endpoints
+# (LabSeedController and friends are @Profile("lab")).
+spring:
+  datasource:
+    hikari:
+      data-source-properties:
+        # Lets the PostgreSQL driver turn each JDBC batch from POST /lab/seed
+        # into multi-row INSERT statements: roughly 3-5x faster bulk loading.
+        # Affects JDBC batches only; JPA writes from the real APIs are unbatched.
+        reWriteBatchedInserts: true

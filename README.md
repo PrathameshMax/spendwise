@@ -138,6 +138,22 @@ one folder per service) lives at `postman/SpendWise.postman_collection.json` —
 import it directly; every request still targets `localhost`, so it works unchanged
 against either option above.
 
+### Option C — Production Debugging Lab mode
+
+Runs the same containers the way production runs them (prod profile, JSON logs,
+`/lab/seed` test-data endpoints on transaction-service) and, optionally, central
+logging in Elasticsearch + Kibana. Everything goes through one script:
+
+```bash
+./scripts/lab.sh start --build   # app stack, production mode (first time after merging code)
+./scripts/lab.sh logs-start      # Elasticsearch + Kibana + Fluent Bit -> http://localhost:5601
+./scripts/lab.sh status
+```
+
+Plain `docker compose up -d` (Option A) is unchanged. See
+[docs/production-debugging/README.md](docs/production-debugging/README.md) for the
+lab itself: how investigations run, the incident catalogue and the tracker.
+
 ## Status
 
 **Milestone 1 (Phase 1) complete** — monorepo BOM, per-environment profile skeleton

@@ -1,0 +1,110 @@
+# =============================================================================
+# Production Debugging Lab — central logging, Elasticsearch + Kibana flavour.
+#
+#   ./scripts/lab.sh logs-start     start   (= docker compose -f infra/elk/docker-compose.yml up -d)
+#   ./scripts/lab.sh logs-stop      stop, keep indexed logs
+#
+# A separate compose project ("spendwise-elk"), so it starts and stops
+# independently of the application stack and can later be swapped for the
+# Splunk flavour without touching any service.
+#
+# Pipeline (the shape many banks run, with Splunk HEC or Elasticsearch at the end):
+#
+#   service stdout (ECS JSON, docker-compose.lab.yml)
+#     -> Docker json-file log on the Docker host
+#     -> Fluent Bit (tails every container log, parses the JSON, adds container name)
+#     -> Elasticsearch index spendwise-logs-YYYY.MM.DD
+#     -> Kibana  http://localhost:5601   (data view "SpendWise logs", created by kibana-setup)
+#
+# Memory: Elasticsearch ~1.5 GB, Kibana ~1 GB, Fluent Bit ~30 MB. On a 16 GB
+# laptop run one log platform at a time.
+#
+# Security is disabled on purpose for a local lab (no TLS, no passwords).
+# Never expose these ports outside your machine.
+# =============================================================================
+name: spendwise-elk
+
+services:
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.5
+    container_name: spendwise-elasticsearch
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      xpack.ml.enabled: "false"
+      # Docker Desktop's default vm.max_map_count (65530) is below what
+      # Elasticsearch's mmap store wants; niofs avoids the requirement.
+      node.store.allow_mmap: "false"
+      ES_JAVA_OPTS: "-Xms1g -Xmx1g"
+    ports:
+      - "9200:9200"
+    volumes:
+      - spendwise-es-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s' || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1600M
+    restart: unless-stopped
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.15.5
+    container_name: spendwise-kibana
+    environment:
+      ELASTICSEARCH_HOSTS: '["http://elasticsearch:9200"]'
+      TELEMETRY_OPTIN: "false"
+    ports:
+      - "5601:5601"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:5601/api/status | grep -Eq '\"level\": *\"available\"' || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 1200M
+    restart: unless-stopped
+
+  # One-shot: creates the "SpendWise logs" data view (index pattern
+  # spendwise-logs-*) and makes it Kibana's default, then exits.
+  kibana-setup:
+    image: curlimages/curl:8.11.1
+    container_name: spendwise-kibana-setup
+    depends_on:
+      kibana:
+        condition: service_healthy
+    volumes:
+      - ./kibana/setup.sh:/setup.sh:ro
+    entrypoint: ["sh", "/setup.sh"]
+    restart: "no"
+
+  fluent-bit:
+    image: fluent/fluent-bit:3.2
+    container_name: spendwise-fluent-bit
+    command: ["/fluent-bit/bin/fluent-bit", "-c", "/fluent-bit/etc/spendwise/fluent-bit.conf"]
+    volumes:
+      - ./fluent-bit:/fluent-bit/etc/spendwise:ro
+      # Container log files on the Docker host (inside the Docker Desktop VM
+      # on Windows/macOS). Read-only.
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      # Remembers how far each file was read, so a restart neither loses nor
+      # re-sends lines.
+      - spendwise-fluent-bit-state:/fluent-bit/state
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  spendwise-es-data:
+  spendwise-fluent-bit-state:

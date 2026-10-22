@@ -1,0 +1,114 @@
+# =============================================================================
+# Production Debugging Lab overlay — run the stack the way production runs it.
+#
+#   ./scripts/lab.sh start        (= docker compose -f docker-compose.yml -f docker-compose.lab.yml up -d)
+#
+# What this overlay changes, and why:
+#
+# 1. SPRING_PROFILES_ACTIVE=prod for every business service. The default
+#    "dev" profile logs com.spendwise at DEBUG and prints every SQL statement;
+#    production runs root=WARN, com.spendwise=INFO (config-repo/*-prod.yml).
+#    transaction-service additionally gets "lab", which switches on the
+#    /lab/seed test-data endpoints. config-server and discovery-server keep
+#    their own profiles (config-server must stay "native").
+#
+# 2. JSON logs. LOGGING_STRUCTURED_FORMAT_CONSOLE=ecs makes Spring Boot write
+#    one Elastic Common Schema JSON object per line to stdout: log.level,
+#    service.name, log.logger, message, the MDC values correlationId, traceId,
+#    spanId, and error.type/error.message/error.stack_trace on exceptions
+#    (the stack trace stays inside the event instead of spilling over many
+#    lines). Kibana and Splunk index those fields directly.
+#    IntelliJ runs are unaffected and keep the readable text pattern.
+#
+# 3. Docker's json-file log driver records each container's compose service
+#    and project name next to every line ("attrs"), so the log shipper
+#    (infra/elk) can label Postgres, Kafka and Redis lines too, and ignore
+#    containers that are not part of SpendWise.
+#
+# Without this overlay, `docker compose up -d` behaves exactly as before.
+# =============================================================================
+
+x-lab-logging: &lab-logging
+  driver: json-file
+  options:
+    labels: "com.docker.compose.service,com.docker.compose.project"
+
+x-json-logs: &json-logs
+  LOGGING_STRUCTURED_FORMAT_CONSOLE: ecs
+  LOGGING_STRUCTURED_ECS_SERVICE_ENVIRONMENT: lab
+
+services:
+  zipkin:
+    logging: *lab-logging
+  postgres:
+    logging: *lab-logging
+  postgres-db-init:
+    logging: *lab-logging
+  kafka-1:
+    logging: *lab-logging
+  kafka-2:
+    logging: *lab-logging
+  kafka-3:
+    logging: *lab-logging
+  kafka-ui:
+    logging: *lab-logging
+  schema-registry:
+    logging: *lab-logging
+  redis:
+    logging: *lab-logging
+  prometheus:
+    logging: *lab-logging
+  grafana:
+    logging: *lab-logging
+
+  discovery-server:
+    logging: *lab-logging
+    environment:
+      <<: *json-logs
+
+  config-server:
+    logging: *lab-logging
+    environment:
+      <<: *json-logs
+
+  auth-service:
+    logging: *lab-logging
+    environment:
+      <<: *json-logs
+      SPRING_PROFILES_ACTIVE: prod
+
+  user-service:
+    logging: *lab-logging
+    environment:
+      <<: *json-logs
+      SPRING_PROFILES_ACTIVE: prod
+
+  transaction-service:
+    logging: *lab-logging
+    environment:
+      <<: *json-logs
+      SPRING_PROFILES_ACTIVE: prod,lab
+
+  budget-service:
+    logging: *lab-logging
+    environment:
+      <<: *json-logs
+      SPRING_PROFILES_ACTIVE: prod
+
+  notification-service:
+    logging: *lab-logging
+    environment:
+      <<: *json-logs
+      SPRING_PROFILES_ACTIVE: prod
+
+  analytics-service:
+    logging: *lab-logging
+    environment:
+      <<: *json-logs
+      SPRING_PROFILES_ACTIVE: prod
+
+  api-gateway:
+    logging: *lab-logging
+    environment:
+      <<: *json-logs
+      SPRING_PROFILES_ACTIVE: prod

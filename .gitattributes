@@ -1,0 +1,5 @@
+# Production Debugging Lab — these files are executed by bash (Git Bash) or
+# mounted into Linux containers (Fluent Bit, the Kibana setup job), where a
+# Windows CRLF line ending breaks them. Keep LF on every checkout.
+scripts/lab.sh text eol=lf
+infra/elk/** text eol=lf
