@@ -1,5 +1,8 @@
 # Production Debugging Lab — these files are executed by bash (Git Bash) or
-# mounted into Linux containers (Fluent Bit, the Kibana setup job), where a
-# Windows CRLF line ending breaks them. Keep LF on every checkout.
+# mounted into Linux containers (Fluent Bit, the Kibana and Splunk setup jobs),
+# where a Windows CRLF line ending breaks them. Keep LF on every checkout.
 scripts/lab.sh text eol=lf
 infra/elk/** text eol=lf
+infra/splunk/** text eol=lf
+infra/fluent-bit/** text eol=lf
+infra/appdynamics/** text eol=lf

@@ -8620,8 +8620,8 @@
           ]
         },
         {
-          "name": "2. Log pipeline check (Kibana)",
-          "description": "Proves the central logging works end to end: one request, one correlation id, followed across services in Kibana.\n\nAfter 2.1, open the Postman Console (View > Show Postman Console) to copy the correlation id, then in Kibana (http://localhost:5601 > Discover, data view 'SpendWise logs') search:  correlationId : \"<the id>\"",
+          "name": "2. Log pipeline check (Kibana or Splunk)",
+          "description": "Proves the central logging works end to end: one request, one correlation id, followed across services in Kibana.\n\nAfter 2.1, open the Postman Console (View > Show Postman Console) to copy the correlation id, then search it.\nKibana (http://localhost:5601 > Discover, data view 'SpendWise logs'):  correlationId : \"<the id>\"\nSplunk (http://localhost:8000 > Search & Reporting):  index=spendwise correlationId=\"<the id>\"",
           "item": [
             {
               "name": "2.1 Create transaction with a known correlation id",
@@ -8682,7 +8682,8 @@
                     "exec": [
                       "pm.test('201 Created', () => pm.response.to.have.status(201));",
                       "const id = pm.collectionVariables.get('labCorrelationId');",
-                      "console.log('Kibana query  ->  correlationId : \"' + id + '\"');"
+                      "console.log('Kibana query  ->  correlationId : \"' + id + '\"');",
+                      "console.log('Splunk query  ->  index=spendwise correlationId=\"' + id + '\"');"
                     ]
                   }
                 }
@@ -8738,6 +8739,50 @@
                       "pm.test('200 OK', () => pm.response.to.have.status(200));",
                       "const page = pm.response.json();",
                       "console.log(`[lab] lab user #1 has ${page.totalElements} transactions`);"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "3. Support tools",
+          "description": "What a support engineer can call directly during an incident (lab mode only).",
+          "item": [
+            {
+              "name": "3.1 Thread dump - transaction-service",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "text/plain"
+                  }
+                ],
+                "url": {
+                  "raw": "{{transactionServiceUrl}}/actuator/threaddump",
+                  "host": [
+                    "{{transactionServiceUrl}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "threaddump"
+                  ]
+                },
+                "description": "Every JVM thread with its state and stack, as plain text (the jstack format). Take 2-3 dumps about 10 seconds apart: a thread stuck on the same line in every dump is blocked, not busy. Save each response (Save Response > Save to a file). Change the port to dump another servlet service: 8082 user, 8084 budget, 18085 notification. Not available on auth-service (8081)."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                      "const text = pm.response.text();",
+                      "const states = {};",
+                      "for (const m of text.matchAll(/java.lang.Thread.State: (\\w+)/g)) { states[m[1]] = (states[m[1]] || 0) + 1; }",
+                      "console.log('[threaddump] thread states:', JSON.stringify(states));"
                     ]
                   }
                 }

@@ -32,8 +32,8 @@ The root cause is revealed only after a genuine attempt, or once found, to expla
 
 | The engineer on support uses | Only through a request (platform team / DBA) |
 |---|---|
-| Kibana, Splunk, AppDynamics, Grafana, Zipkin | Restart or scale a service |
-| Postman: business APIs and secured Actuator endpoints | Thread dump or heap dump from inside a container |
+| Kibana, Splunk, AppDynamics, Grafana, Prometheus alerts, Zipkin | Restart or scale a service |
+| Postman: business APIs and Actuator endpoints, including `GET /actuator/threaddump` on a service's own port | Heap dump, or `jcmd`/`jstack` from inside a container |
 | Reading code and configuration in the repository | Database queries, locks, explain plans |
 | | Deploying a fix (change request + approval) |
 
@@ -44,28 +44,50 @@ tools. They are not used during an investigation unless the request was made.
 
 | Component | Where | Notes |
 |---|---|---|
-| Production mode | `docker-compose.lab.yml` | `prod` profile (root WARN, com.spendwise INFO), ECS JSON logs, compose labels on every container log |
+| Production mode | `docker-compose.lab.yml` | `prod,lab` profiles (root WARN, com.spendwise INFO), ECS JSON logs, compose labels on every container log |
+| Lab metrics | `config-repo/application-lab.yml` | Latency histograms (p95/p99), Tomcat thread metrics, `threaddump` endpoint |
 | Test data | `POST/GET/DELETE /lab/seed` on transaction-service (8083) | `lab` profile only; realistic Indian retail-banking ledger; lab ids start with `1ab5eed0` and are removed without touching real data |
-| Central logging (Kibana) | `infra/elk/` | Fluent Bit -> Elasticsearch -> Kibana, data view "SpendWise logs" |
-| Central logging (Splunk) | planned | Same Fluent Bit pipeline, Splunk HEC output |
-| APM (AppDynamics) | planned | SaaS trial controller + Java agent on 2-3 services |
+| Dashboard | Grafana http://localhost:3000, "SpendWise — Production Lab" | Firing alerts, golden signals, HikariCP pool, threads, heap/GC/CPU, Kafka lag |
+| Alerts | `infra/prometheus/alerts-lab.yml`, http://localhost:9090/alerts | 10 symptom-based rules (latency, pool, threads, CPU, GC, heap, lag, DLT, service down) |
+| Central logging (Kibana) | `infra/elk/` | Fluent Bit -> Elasticsearch -> Kibana http://localhost:5601, data view "SpendWise logs" |
+| Central logging (Splunk) | `infra/splunk/` | Same Fluent Bit pipeline -> Splunk HEC -> index `spendwise`, http://localhost:8000 (admin / SpendWiseLab#2026) |
+| Shared log pipeline | `infra/fluent-bit/pipeline.conf` | One reading/filtering/field-naming config for both platforms |
+| APM (AppDynamics) | `docker-compose.appd.yml`, `infra/appdynamics/` | SaaS trial controller; agent on api-gateway, transaction-service, notification-service |
 | Requests | `postman/SpendWise.postman_collection.json` | Folder "Production Debugging Lab" |
-| Start / stop | `scripts/lab.sh` | `start`, `stop`, `status`, `logs-start`, `logs-stop`, `logs-status` |
+| Start / stop | `scripts/lab.sh` | `start`, `stop`, `status`, `kibana-start/stop/status`, `splunk-start/stop/status` |
 
 Run one log platform at a time on a 16 GB laptop: the app stack uses about
-7 GB, Elasticsearch + Kibana about 2.5 GB.
+7 GB, Elasticsearch + Kibana about 2.5 GB, Splunk about 2 GB. `lab.sh`
+refuses to start one while the other runs.
 
-### Searching logs in Kibana
+### Searching logs: Kibana and Splunk side by side
 
-Field names are flattened with underscores. Useful queries in Discover:
+Both platforms receive the same events with the same field names (dots in
+ECS names become underscores: `log_level`, `service_name`, `error_type`).
 
-| Question | Query |
-|---|---|
-| One request across every service | `correlationId : "lab-1729600000000"` |
-| One trace (same as Zipkin) | `traceId : "<id>"` |
-| Errors from one service | `service_name : "transaction-service" and log_level : "ERROR"` |
-| Exceptions of a type | `error_type : *SQLTransientConnectionException*` |
-| Infrastructure containers (plain text) | `container_name : "postgres"` |
+| Question | Kibana (KQL, Discover) | Splunk (SPL, Search & Reporting) |
+|---|---|---|
+| One request across every service | `correlationId : "lab-1729600000000"` | `index=spendwise correlationId="lab-1729600000000"` |
+| One trace (same as Zipkin) | `traceId : "<id>"` | `index=spendwise traceId="<id>"` |
+| Errors from one service | `service_name : "transaction-service" and log_level : "ERROR"` | `index=spendwise service_name="transaction-service" log_level=ERROR` |
+| Exceptions of a type | `error_type : *SQLTransientConnectionException*` | `index=spendwise error_type="*SQLTransientConnectionException*"` |
+| Infrastructure containers (plain text) | `container_name : "postgres"` | `index=spendwise container_name=postgres` |
+| Error count per service, per minute | Visualize: `log_level : "ERROR"`, break down by `service_name` | `index=spendwise log_level=ERROR \| timechart span=1m count by service_name` |
+| Most frequent errors | Field statistics on `error_type` | `index=spendwise log_level=ERROR \| stats count by service_name, error_type \| sort -count` |
+
+Search a field, never the bare value: `lab-1729600000000` typed alone is
+split into `lab` and `1729600000000`, and `lab` matches every event.
+
+### AppDynamics setup (once)
+
+1. Sign up for the AppDynamics SaaS free trial (Splunk AppDynamics website).
+   The trial clock starts at sign-up, so do it when you are ready to use it.
+2. In the controller: gear icon > License > Account: note the account name
+   and access key; the controller host is the host part of the controller URL.
+3. Copy `infra/appdynamics/appd.env.example` to `infra/appdynamics/appd.env`
+   and fill it in (git-ignored).
+4. `./scripts/lab.sh start` prints "AppDynamics agent: ON". After 2-5 minutes
+   of traffic, application **SpendWise-Lab** appears with three tiers.
 
 ## Incident catalogue
 

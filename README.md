@@ -141,12 +141,14 @@ against either option above.
 ### Option C — Production Debugging Lab mode
 
 Runs the same containers the way production runs them (prod profile, JSON logs,
-`/lab/seed` test-data endpoints on transaction-service) and, optionally, central
-logging in Elasticsearch + Kibana. Everything goes through one script:
+lab metrics and alerts, `/lab/seed` test-data endpoints on transaction-service)
+and, optionally, central logging in Kibana or Splunk and the AppDynamics agent.
+Everything goes through one script:
 
 ```bash
 ./scripts/lab.sh start --build   # app stack, production mode (first time after merging code)
-./scripts/lab.sh logs-start      # Elasticsearch + Kibana + Fluent Bit -> http://localhost:5601
+./scripts/lab.sh kibana-start    # Elasticsearch + Kibana + Fluent Bit -> http://localhost:5601
+./scripts/lab.sh splunk-start    # or Splunk instead (one at a time)    -> http://localhost:8000
 ./scripts/lab.sh status
 ```
 

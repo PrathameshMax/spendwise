@@ -1,0 +1,88 @@
+# =============================================================================
+# Production Debugging Lab — AppDynamics APM overlay.
+#
+# Added automatically by ./scripts/lab.sh start when infra/appdynamics/appd.env
+# exists (copy infra/appdynamics/appd.env.example and fill in your controller
+# details; that file is git-ignored because it holds your access key).
+#
+# Instruments three tiers of the application "SpendWise-Lab":
+#   api-gateway          (WebFlux / Netty entry point)
+#   transaction-service  (Servlet + JPA + Kafka outbox: database calls, business transactions)
+#   notification-service (Kafka consumer)
+#
+# How the agent gets into the containers, the same way a Kubernetes init
+# container does it in production: appd-agent copies the agent files from
+# AppDynamics' image into a shared volume, appd-agent-permissions makes them
+# writable for the services' non-root user (the agent writes its own logs
+# there), and each service starts java with -javaagent via JDK_JAVA_OPTIONS.
+# JDK_JAVA_OPTIONS rather than JAVA_TOOL_OPTIONS, because notification-service
+# already uses JAVA_TOOL_OPTIONS for its heap settings.
+#
+# Memory: the agent adds roughly 100-200 MB per JVM, so these three services
+# get 768M instead of 512M while the agent is attached.
+# =============================================================================
+
+x-appd-service: &appd-service
+  env_file: infra/appdynamics/appd.env
+  volumes:
+    - appd-agent:/opt/appdynamics
+  depends_on:
+    appd-agent-permissions:
+      condition: service_completed_successfully
+  deploy:
+    resources:
+      limits:
+        cpus: "1.0"
+        memory: 768M
+
+services:
+  appd-agent:
+    # AppDynamics publishes only "latest" for this image.
+    image: appdynamics/java-agent:latest
+    container_name: spendwise-appd-agent
+    user: "0:0"
+    command: ["cp", "-ra", "/opt/appdynamics/.", "/agent/"]
+    volumes:
+      - appd-agent:/agent
+    restart: "no"
+
+  appd-agent-permissions:
+    image: alpine:3.20
+    container_name: spendwise-appd-agent-permissions
+    command: ["sh", "-c", "chmod -R a+rwX /agent && ls /agent/javaagent.jar"]
+    volumes:
+      - appd-agent:/agent
+    depends_on:
+      appd-agent:
+        condition: service_completed_successfully
+    restart: "no"
+
+  transaction-service:
+    <<: *appd-service
+    environment:
+      JDK_JAVA_OPTIONS: "-javaagent:/opt/appdynamics/javaagent.jar"
+      APPDYNAMICS_AGENT_APPLICATION_NAME: SpendWise-Lab
+      APPDYNAMICS_AGENT_TIER_NAME: transaction-service
+      APPDYNAMICS_JAVA_AGENT_REUSE_NODE_NAME: "true"
+      APPDYNAMICS_JAVA_AGENT_REUSE_NODE_NAME_PREFIX: transaction-service
+
+  notification-service:
+    <<: *appd-service
+    environment:
+      JDK_JAVA_OPTIONS: "-javaagent:/opt/appdynamics/javaagent.jar"
+      APPDYNAMICS_AGENT_APPLICATION_NAME: SpendWise-Lab
+      APPDYNAMICS_AGENT_TIER_NAME: notification-service
+      APPDYNAMICS_JAVA_AGENT_REUSE_NODE_NAME: "true"
+      APPDYNAMICS_JAVA_AGENT_REUSE_NODE_NAME_PREFIX: notification-service
+
+  api-gateway:
+    <<: *appd-service
+    environment:
+      JDK_JAVA_OPTIONS: "-javaagent:/opt/appdynamics/javaagent.jar"
+      APPDYNAMICS_AGENT_APPLICATION_NAME: SpendWise-Lab
+      APPDYNAMICS_AGENT_TIER_NAME: api-gateway
+      APPDYNAMICS_JAVA_AGENT_REUSE_NODE_NAME: "true"
+      APPDYNAMICS_JAVA_AGENT_REUSE_NODE_NAME_PREFIX: api-gateway
+
+volumes:
+  appd-agent:

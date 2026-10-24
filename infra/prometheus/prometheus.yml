@@ -3,7 +3,9 @@ global:
   evaluation_interval: 15s
 
 rule_files:
-  - /etc/prometheus/alerts.yml
+  # Lab mode mounts alerts-lab.yml next to alerts.yml (docker-compose.lab.yml);
+  # without it the glob matches alerts.yml only.
+  - /etc/prometheus/alerts*.yml
 
 scrape_configs:
   # Milestone 9 — every service now runs as its own container on this same

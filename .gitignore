@@ -35,3 +35,6 @@ Thumbs.db
 
 # Testcontainers / Docker
 *.pid
+
+# Production Debugging Lab: AppDynamics controller credentials (copy appd.env.example)
+infra/appdynamics/appd.env

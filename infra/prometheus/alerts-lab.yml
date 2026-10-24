@@ -1,0 +1,108 @@
+# Production Debugging Lab — alert rules a bank's monitoring team would run.
+# Loaded only in lab mode (docker-compose.lab.yml mounts this file).
+# See them at http://localhost:9090/alerts, or in Grafana's "Firing alerts"
+# panel (dashboard "SpendWise — Production Lab").
+#
+# Each alert names a symptom, not a cause. Several causes can raise the same
+# alert; finding which one is the investigation.
+
+groups:
+  - name: spendwise-lab-availability
+    rules:
+      - alert: ServiceDown
+        expr: up{job=~"spendwise.*"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.service }} is not answering Prometheus scrapes"
+          description: "The /actuator/prometheus endpoint of {{ $labels.service }} ({{ $labels.instance }}) has failed for more than 1 minute."
+
+      - alert: HighLatencyP95
+        expr: >
+          histogram_quantile(0.95,
+            sum by (service, le) (rate(http_server_requests_seconds_bucket[5m]))
+          ) > 1
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "p95 latency above 1s on {{ $labels.service }}"
+          description: "95% of requests to {{ $labels.service }} take up to {{ $value | humanizeDuration }} (threshold 1s) over the last 5 minutes."
+
+  - name: spendwise-lab-resources
+    rules:
+      - alert: DbConnectionPoolNearlyFull
+        expr: max by (service) (hikaricp_connections_active / hikaricp_connections_max) > 0.8
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Database connection pool above 80% on {{ $labels.service }}"
+          description: "{{ $labels.service }} is using {{ $value | humanizePercentage }} of its HikariCP pool."
+
+      - alert: DbConnectionWaits
+        expr: max by (service) (hikaricp_connections_pending) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Requests waiting for a database connection on {{ $labels.service }}"
+          description: "{{ $value }} thread(s) on {{ $labels.service }} have been waiting for a free HikariCP connection for more than 1 minute."
+
+      - alert: WebThreadsNearlyExhausted
+        expr: max by (service) (tomcat_threads_busy_threads / tomcat_threads_config_max_threads) > 0.8
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Tomcat request threads above 80% busy on {{ $labels.service }}"
+          description: "{{ $value | humanizePercentage }} of {{ $labels.service }}'s request threads are busy."
+
+      - alert: HighCpu
+        expr: max by (service) (process_cpu_usage) > 0.9
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CPU above 90% on {{ $labels.service }}"
+          description: "{{ $labels.service }} has used {{ $value | humanizePercentage }} of its CPU allowance for 3 minutes."
+
+  - name: spendwise-lab-jvm
+    rules:
+      - alert: HighGcTime
+        expr: sum by (service) (rate(jvm_gc_pause_seconds_sum[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.service }} spends more than 10% of its time in GC pauses"
+          description: "GC pauses took {{ $value | humanizePercentage }} of wall-clock time over the last 5 minutes."
+
+      - alert: HeapAfterGcHigh
+        expr: max by (service) (jvm_gc_live_data_size_bytes / jvm_gc_max_data_size_bytes) > 0.85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Old generation above 85% after GC on {{ $labels.service }}"
+          description: "After the last major collection {{ $labels.service }} still holds {{ $value | humanizePercentage }} of its old generation."
+
+  - name: spendwise-lab-messaging
+    rules:
+      - alert: KafkaConsumerLagHigh
+        expr: max by (service, topic) (kafka_consumer_fetch_manager_records_lag_max) > 1000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.service }} is more than 1000 records behind on {{ $labels.topic }}"
+          description: "Maximum partition lag is {{ $value }} records and has stayed above 1000 for 5 minutes."
+
+      - alert: KafkaRecordsDeadLettered
+        expr: sum by (service, group, topic) (increase(spendwise_kafka_records_deadlettered_total[10m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Records dead-lettered by {{ $labels.group }} on {{ $labels.topic }}"
+          description: "{{ $value | humanize }} record(s) went to the dead letter topic in the last 10 minutes."

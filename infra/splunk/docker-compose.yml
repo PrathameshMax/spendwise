@@ -1,0 +1,89 @@
+# =============================================================================
+# Production Debugging Lab — central logging, Splunk flavour.
+#
+#   ./scripts/lab.sh splunk-start     start   (= docker compose -f infra/splunk/docker-compose.yml up -d)
+#   ./scripts/lab.sh splunk-stop      stop, keep indexed logs
+#   ./scripts/lab.sh splunk-status    health and shipper errors
+#
+# Pipeline (same reading/filtering as the Kibana flavour, infra/fluent-bit/pipeline.conf):
+#
+#   service stdout (ECS JSON) -> Docker json-file log
+#     -> Fluent Bit -> Splunk HTTP Event Collector (HEC, port 8088, inside Docker only)
+#     -> index "spendwise", sourcetype "spendwise:container"
+#     -> Splunk Web  http://localhost:8000   (admin / SpendWiseLab#2026)
+#
+# Licence: the container starts on Splunk Enterprise's 60-day trial licence
+# (500 MB/day indexing; repeated overruns block searching). Fluent Bit here
+# ships only NEW log lines (READ_FROM_HEAD=Off), so starting Splunk does not
+# replay days of old container logs into the daily allowance. Check usage in
+# Splunk Web: Settings > Licensing. After the trial, switch to the free licence
+# by uncommenting SPLUNK_LICENSE_URI below (no login screen and no alerting
+# then, searching still works).
+#
+# Memory: Splunk ~1.5-2 GB. Run one log platform at a time on a 16 GB laptop
+# (./scripts/lab.sh splunk-start refuses to start while Kibana's stack runs).
+#
+# Local lab only: fixed password and HEC token, ports bound to 127.0.0.1.
+# =============================================================================
+name: spendwise-splunk
+
+x-hec-token: &hec-token "8c2f6b1e-4d7a-4f0e-9b3c-5a1d2e7f9c40"
+
+services:
+  splunk:
+    # Only "latest" is published for Splunk Enterprise 10.x; it needs the
+    # General Terms acceptance below (in addition to the licence).
+    image: splunk/splunk:latest
+    container_name: spendwise-splunk
+    environment:
+      SPLUNK_START_ARGS: "--accept-license"
+      SPLUNK_GENERAL_TERMS: "--accept-sgt-current-at-splunk-com"
+      SPLUNK_PASSWORD: "SpendWiseLab#2026"
+      # HEC on 8088 with a fixed token, plain HTTP: only Fluent Bit, inside
+      # this Docker network, sends to it.
+      SPLUNK_HEC_TOKEN: *hec-token
+      SPLUNK_HEC_SSL: "false"
+      # SPLUNK_LICENSE_URI: "Free"
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - spendwise-splunk-var:/opt/splunk/var
+      - spendwise-splunk-etc:/opt/splunk/etc
+    restart: unless-stopped
+
+  # One-shot: creates the "spendwise" index (14 days, max 5 GB) through
+  # Splunk's REST API, then exits.
+  splunk-setup:
+    image: curlimages/curl:8.11.1
+    container_name: spendwise-splunk-setup
+    environment:
+      SPLUNK_PASSWORD: "SpendWiseLab#2026"
+    depends_on:
+      splunk:
+        condition: service_healthy
+    volumes:
+      - ./setup.sh:/setup.sh:ro
+    entrypoint: ["sh", "/setup.sh"]
+    restart: "no"
+
+  fluent-bit:
+    image: fluent/fluent-bit:3.2
+    container_name: spendwise-fluent-bit-splunk
+    command: ["/fluent-bit/bin/fluent-bit", "-c", "/fluent-bit/etc/spendwise/fluent-bit.conf"]
+    environment:
+      READ_FROM_HEAD: "Off"
+      SPLUNK_HEC_TOKEN: *hec-token
+    volumes:
+      - ../fluent-bit:/fluent-bit/etc/shared:ro
+      - ./fluent-bit:/fluent-bit/etc/spendwise:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - spendwise-fluent-bit-splunk-state:/fluent-bit/state
+    depends_on:
+      splunk-setup:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+volumes:
+  spendwise-splunk-var:
+  spendwise-splunk-etc:
+  spendwise-fluent-bit-splunk-state:

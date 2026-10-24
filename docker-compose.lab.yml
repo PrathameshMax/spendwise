@@ -5,12 +5,14 @@
 #
 # What this overlay changes, and why:
 #
-# 1. SPRING_PROFILES_ACTIVE=prod for every business service. The default
+# 1. SPRING_PROFILES_ACTIVE=prod,lab for every business service. The default
 #    "dev" profile logs com.spendwise at DEBUG and prints every SQL statement;
 #    production runs root=WARN, com.spendwise=INFO (config-repo/*-prod.yml).
-#    transaction-service additionally gets "lab", which switches on the
-#    /lab/seed test-data endpoints. config-server and discovery-server keep
-#    their own profiles (config-server must stay "native").
+#    Every business service also gets "lab": config-repo/application-lab.yml
+#    turns on latency histograms, Tomcat thread metrics and the threaddump
+#    endpoint, and on transaction-service it switches on the /lab/seed
+#    test-data endpoints. config-server and discovery-server keep their own
+#    profiles (config-server must stay "native").
 #
 # 2. JSON logs. LOGGING_STRUCTURED_FORMAT_CONSOLE=ecs makes Spring Boot write
 #    one Elastic Common Schema JSON object per line to stdout: log.level,
@@ -24,6 +26,8 @@
 #    and project name next to every line ("attrs"), so the log shipper
 #    (infra/elk) can label Postgres, Kafka and Redis lines too, and ignore
 #    containers that are not part of SpendWise.
+#
+# 4. Prometheus loads the lab alert rules (infra/prometheus/alerts-lab.yml).
 #
 # Without this overlay, `docker compose up -d` behaves exactly as before.
 # =============================================================================
@@ -58,6 +62,8 @@ services:
     logging: *lab-logging
   prometheus:
     logging: *lab-logging
+    volumes:
+      - ./infra/prometheus/alerts-lab.yml:/etc/prometheus/alerts-lab.yml
   grafana:
     logging: *lab-logging
 
@@ -70,18 +76,25 @@ services:
     logging: *lab-logging
     environment:
       <<: *json-logs
+      # config-server logs an INFO line ("Adding property source ...") for every
+      # property file each time a client fetches configuration: in the first
+      # Kibana run that was several identical lines a minute, burying real
+      # events and burning Splunk's 500 MB/day licence. Production teams tune
+      # this logger to WARN. Env var logger names are lower-cased by Spring,
+      # so the level is set on the package rather than the class.
+      LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_CLOUD_CONFIG_SERVER_ENVIRONMENT: WARN
 
   auth-service:
     logging: *lab-logging
     environment:
       <<: *json-logs
-      SPRING_PROFILES_ACTIVE: prod
+      SPRING_PROFILES_ACTIVE: prod,lab
 
   user-service:
     logging: *lab-logging
     environment:
       <<: *json-logs
-      SPRING_PROFILES_ACTIVE: prod
+      SPRING_PROFILES_ACTIVE: prod,lab
 
   transaction-service:
     logging: *lab-logging
@@ -93,22 +106,22 @@ services:
     logging: *lab-logging
     environment:
       <<: *json-logs
-      SPRING_PROFILES_ACTIVE: prod
+      SPRING_PROFILES_ACTIVE: prod,lab
 
   notification-service:
     logging: *lab-logging
     environment:
       <<: *json-logs
-      SPRING_PROFILES_ACTIVE: prod
+      SPRING_PROFILES_ACTIVE: prod,lab
 
   analytics-service:
     logging: *lab-logging
     environment:
       <<: *json-logs
-      SPRING_PROFILES_ACTIVE: prod
+      SPRING_PROFILES_ACTIVE: prod,lab
 
   api-gateway:
     logging: *lab-logging
     environment:
       <<: *json-logs
-      SPRING_PROFILES_ACTIVE: prod
+      SPRING_PROFILES_ACTIVE: prod,lab

@@ -6,13 +6,14 @@
 #
 # A separate compose project ("spendwise-elk"), so it starts and stops
 # independently of the application stack and can later be swapped for the
-# Splunk flavour without touching any service.
+# Splunk flavour (infra/splunk) without touching any service.
 #
 # Pipeline (the shape many banks run, with Splunk HEC or Elasticsearch at the end):
 #
 #   service stdout (ECS JSON, docker-compose.lab.yml)
 #     -> Docker json-file log on the Docker host
-#     -> Fluent Bit (tails every container log, parses the JSON, adds container name)
+#     -> Fluent Bit (infra/fluent-bit/pipeline.conf: tails every container log,
+#        parses the JSON, adds container name; shared with the Splunk flavour)
 #     -> Elasticsearch index spendwise-logs-YYYY.MM.DD
 #     -> Kibana  http://localhost:5601   (data view "SpendWise logs", created by kibana-setup)
 #
@@ -92,7 +93,11 @@ services:
     image: fluent/fluent-bit:3.2
     container_name: spendwise-fluent-bit
     command: ["/fluent-bit/bin/fluent-bit", "-c", "/fluent-bit/etc/spendwise/fluent-bit.conf"]
+    environment:
+      # Ship container logs written before this shipper first started, too.
+      READ_FROM_HEAD: "On"
     volumes:
+      - ../fluent-bit:/fluent-bit/etc/shared:ro
       - ./fluent-bit:/fluent-bit/etc/spendwise:ro
       # Container log files on the Docker host (inside the Docker Desktop VM
       # on Windows/macOS). Read-only.

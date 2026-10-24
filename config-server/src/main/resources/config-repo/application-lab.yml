@@ -1,0 +1,32 @@
+# Production Debugging Lab — shared by every service started with the "lab"
+# profile (docker-compose.lab.yml sets SPRING_PROFILES_ACTIVE=prod,lab).
+# Turns on the metrics a production dashboard needs; changes no behaviour.
+
+server:
+  tomcat:
+    # Publishes Tomcat's thread pool as metrics: tomcat_threads_busy_threads,
+    # tomcat_threads_current_threads, tomcat_threads_config_max_threads.
+    # Servlet services only; api-gateway and analytics-service run on Netty.
+    mbeanregistry:
+      enabled: true
+
+management:
+  metrics:
+    distribution:
+      # Latency histograms (http_server_requests_seconds_bucket), so Grafana
+      # and Prometheus can compute p95/p99 per service and per endpoint.
+      # The expected range bounds the number of buckets per time series.
+      percentiles-histogram:
+        "[http.server.requests]": true
+      minimum-expected-value:
+        "[http.server.requests]": 5ms
+      maximum-expected-value:
+        "[http.server.requests]": 30s
+  endpoints:
+    web:
+      exposure:
+        # threaddump added for support engineers (GET /actuator/threaddump on
+        # each service's own port). auth-service's ActuatorSecurityConfig still
+        # denies it there. heapdump stays off: heap dumps contain customer data
+        # and go through the platform team.
+        include: health,info,refresh,metrics,prometheus,threaddump
