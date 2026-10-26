@@ -7,6 +7,10 @@
 #   ./scripts/lab.sh stop             stop the app stack (containers and data kept)
 #   ./scripts/lab.sh status           what is running, and is it healthy
 #
+#   ./scripts/lab.sh traffic-start    steady mobile-app traffic (k6) against transaction-service
+#   ./scripts/lab.sh traffic-stop     stop it
+#   ./scripts/lab.sh traffic-status   the simulator's latest progress line
+#
 #   ./scripts/lab.sh kibana-start     Elasticsearch + Kibana + Fluent Bit   -> http://localhost:5601
 #   ./scripts/lab.sh kibana-stop      stop them (indexed logs kept)
 #   ./scripts/lab.sh kibana-status    health, and is Fluent Bit shipping
@@ -34,7 +38,7 @@ ELK=(docker compose -f infra/elk/docker-compose.yml)
 SPLUNK=(docker compose -f infra/splunk/docker-compose.yml)
 
 usage() {
-  sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'
   exit 1
 }
 
@@ -65,10 +69,24 @@ case "${1:-}" in
     echo "  ./scripts/lab.sh status"
     ;;
   stop)
-    "${APP[@]}" stop
+    "${APP[@]}" --profile traffic stop
     ;;
   status)
-    "${APP[@]}" ps --format "table {{.Service}}\t{{.Status}}"
+    "${APP[@]}" --profile traffic ps --format "table {{.Service}}\t{{.Status}}"
+    ;;
+  traffic-start)
+    "${APP[@]}" --profile traffic up -d traffic-simulator
+    echo
+    echo "Simulating ${HOME_SCREEN_PER_MIN:-90} home-screen and ${STATEMENT_PER_MIN:-120} statement requests per minute"
+    echo "for lab users 1..${LAB_USERS:-1000}. It runs until: ./scripts/lab.sh traffic-stop"
+    ;;
+  traffic-stop)
+    "${APP[@]}" --profile traffic stop traffic-simulator
+    ;;
+  traffic-status)
+    "${APP[@]}" --profile traffic ps -a traffic-simulator --format "table {{.Service}}\t{{.Status}}"
+    echo
+    docker logs --tail 3 spendwise-traffic-simulator 2>&1 || true
     ;;
   kibana-start|logs-start)
     if running spendwise-splunk; then

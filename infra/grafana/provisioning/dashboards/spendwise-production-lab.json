@@ -8,7 +8,7 @@
   ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 2,
+  "version": 3,
   "editable": true,
   "graphTooltip": 1,
   "refresh": "10s",
@@ -279,7 +279,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "",
+      "description": "Share of requests answered with a 5xx. The error series only exists once a service has returned a 5xx, so 0% is shown until then.",
       "gridPos": {
         "h": 8,
         "w": 8,
@@ -303,6 +303,7 @@
             }
           },
           "min": 0,
+          "noValue": "0%",
           "thresholds": {
             "mode": "absolute",
             "steps": [
