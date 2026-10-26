@@ -8,7 +8,7 @@
   ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "editable": true,
   "graphTooltip": 1,
   "refresh": "10s",
@@ -169,7 +169,9 @@
         }
       ],
       "fieldConfig": {
-        "defaults": {},
+        "defaults": {
+          "noValue": "No alerts firing"
+        },
         "overrides": [
           {
             "matcher": {
@@ -263,7 +265,7 @@
             "uid": "${datasource}"
           },
           "refId": "A",
-          "expr": "sum by (service) (rate(http_server_requests_seconds_count{service=~\"$service\"}[1m]))",
+          "expr": "sum by (service) (rate(http_server_requests_seconds_count{service=~\"$service\",uri!~\"/actuator.*\"}[1m]))",
           "legendFormat": "{{service}}",
           "range": true
         }
@@ -338,7 +340,7 @@
             "uid": "${datasource}"
           },
           "refId": "A",
-          "expr": "100 * sum by (service) (rate(http_server_requests_seconds_count{service=~\"$service\",outcome=\"SERVER_ERROR\"}[1m])) / sum by (service) (rate(http_server_requests_seconds_count{service=~\"$service\"}[1m]))",
+          "expr": "100 * sum by (service) (rate(http_server_requests_seconds_count{service=~\"$service\",uri!~\"/actuator.*\",outcome=\"SERVER_ERROR\"}[1m])) / sum by (service) (rate(http_server_requests_seconds_count{service=~\"$service\",uri!~\"/actuator.*\"}[1m]))",
           "legendFormat": "{{service}}",
           "range": true
         }
@@ -413,7 +415,7 @@
             "uid": "${datasource}"
           },
           "refId": "A",
-          "expr": "histogram_quantile(0.95, sum by (service, le) (rate(http_server_requests_seconds_bucket{service=~\"$service\"}[1m])))",
+          "expr": "histogram_quantile(0.95, sum by (service, le) (rate(http_server_requests_seconds_bucket{service=~\"$service\",uri!~\"/actuator.*\"}[1m])))",
           "legendFormat": "{{service}}",
           "range": true
         }
@@ -472,7 +474,7 @@
             "uid": "${datasource}"
           },
           "refId": "A",
-          "expr": "histogram_quantile(0.99, sum by (service, method, uri, le) (rate(http_server_requests_seconds_bucket{service=~\"$service\"}[1m])))",
+          "expr": "histogram_quantile(0.99, sum by (service, method, uri, le) (rate(http_server_requests_seconds_bucket{service=~\"$service\",uri!~\"/actuator.*\"}[1m])))",
           "legendFormat": "{{service}} {{method}} {{uri}}",
           "range": true
         }
@@ -1366,7 +1368,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Records parked on a dead letter topic after retries were exhausted.",
+      "description": "Records parked on a dead letter topic after retries were exhausted. The counter only exists after the first dead-lettered record, so 'None yet' is the healthy state.",
       "gridPos": {
         "h": 8,
         "w": 8,
@@ -1386,7 +1388,8 @@
               "group": "A"
             }
           },
-          "min": 0
+          "min": 0,
+          "noValue": "None yet"
         },
         "overrides": []
       },
