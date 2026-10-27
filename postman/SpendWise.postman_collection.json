@@ -343,6 +343,10 @@
     {
       "key": "labTxDate",
       "value": ""
+    },
+    {
+      "key": "labMonth",
+      "value": ""
     }
   ],
   "item": [
@@ -1842,6 +1846,37 @@
                 "description": "All query params are optional and independently combinable \u2014 built on JPA Specifications (TransactionSpecifications). Delete any param you don't need."
               },
               "response": []
+            },
+            {
+              "name": "Monthly Insights (home screen)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{transactionServiceUrl}}/api/v1/transactions/insights/monthly?userId={{userId}}&month=2026-10",
+                  "host": [
+                    "{{transactionServiceUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "transactions",
+                    "insights",
+                    "monthly"
+                  ],
+                  "query": [
+                    {
+                      "key": "userId",
+                      "value": "{{userId}}"
+                    },
+                    {
+                      "key": "month",
+                      "value": "2026-10"
+                    }
+                  ]
+                },
+                "description": "Home screen 'This month' card: spending by category with shares, income, and the top 5 UPI merchants."
+              }
             }
           ],
           "description": ""
@@ -8783,6 +8818,76 @@
                       "const states = {};",
                       "for (const m of text.matchAll(/java.lang.Thread.State: (\\w+)/g)) { states[m[1]] = (states[m[1]] || 0) + 1; }",
                       "console.log('[threaddump] thread states:', JSON.stringify(states));"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "4. Home screen",
+          "description": "The mobile app's home screen card (GET /api/v1/transactions/insights/monthly), for a lab user, through the gateway.",
+          "item": [
+            {
+              "name": "4.1 Monthly insights - lab user #1 (via Gateway)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  },
+                  {
+                    "key": "X-Correlation-ID",
+                    "value": "{{labCorrelationId}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{apiGatewayUrl}}/api/v1/transactions/insights/monthly?userId=1ab5eed0-0000-0001-0000-000000000000&month={{labMonth}}",
+                  "host": [
+                    "{{apiGatewayUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "transactions",
+                    "insights",
+                    "monthly"
+                  ],
+                  "query": [
+                    {
+                      "key": "userId",
+                      "value": "1ab5eed0-0000-0001-0000-000000000000"
+                    },
+                    {
+                      "key": "month",
+                      "value": "{{labMonth}}"
+                    }
+                  ]
+                },
+                "description": "This month's spending by category and top UPI merchants for lab user #1. Change the 0001 part of the userId (hex) for another lab user."
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.collectionVariables.set('labMonth', new Date().toISOString().slice(0, 7));",
+                      "pm.collectionVariables.set('labCorrelationId', 'lab-' + Date.now());"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                      "const i = pm.response.json();",
+                      "console.log(`[home] ${i.month}: spent ${i.totalSpent}, income ${i.totalIncome}, ${i.expenseCount} expenses, took ${pm.response.responseTime} ms`);",
+                      "console.log('Splunk query  ->  index=spendwise correlationId=\"' + pm.collectionVariables.get('labCorrelationId') + '\"');"
                     ]
                   }
                 }
