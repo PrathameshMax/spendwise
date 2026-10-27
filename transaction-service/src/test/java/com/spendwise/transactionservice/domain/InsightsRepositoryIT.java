@@ -55,8 +55,11 @@ class InsightsRepositoryIT {
         save(userId, groceries, "999.00", TransactionType.EXPENSE, "UPI/BIGBASKET/114/GPay", LocalDate.of(2026, 9, 30));
         save(otherUser, groceries, "5000.00", TransactionType.EXPENSE, "UPI/DMART/115/GPay", LocalDate.of(2026, 10, 5));
 
-        List<SpendTotal> byCategory = insightsRepository.totalsByCategory(userId.toString(), "2026-10");
-        List<SpendTotal> merchants = insightsRepository.topUpiMerchants(userId.toString(), "2026-10");
+        LocalDate monthStart = LocalDate.of(2026, 10, 1);
+        LocalDate nextMonthStart = LocalDate.of(2026, 11, 1);
+
+        List<SpendTotal> byCategory = insightsRepository.totalsByCategory(userId, monthStart, nextMonthStart);
+        List<SpendTotal> merchants = insightsRepository.topUpiMerchants(userId, monthStart, nextMonthStart);
 
         assertThat(byCategory).hasSize(2);
         assertThat(byCategory.get(0).getLabel()).isEqualTo(salary.getName());

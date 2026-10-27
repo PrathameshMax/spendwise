@@ -6,8 +6,10 @@ import com.spendwise.transactionservice.domain.SpendTotal;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.YearMonth;
 import java.util.List;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -56,12 +58,12 @@ class InsightsServiceTest {
     private static InsightsRepository repository(List<SpendTotal> byCategory, List<SpendTotal> merchants) {
         return new InsightsRepository() {
             @Override
-            public List<SpendTotal> totalsByCategory(String userId, String month) {
+            public List<SpendTotal> totalsByCategory(UUID userId, LocalDate monthStart, LocalDate nextMonthStart) {
                 return byCategory;
             }
 
             @Override
-            public List<SpendTotal> topUpiMerchants(String userId, String month) {
+            public List<SpendTotal> topUpiMerchants(UUID userId, LocalDate monthStart, LocalDate nextMonthStart) {
                 return merchants;
             }
         };

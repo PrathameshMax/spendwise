@@ -13,6 +13,9 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.YearMonth;
 import java.util.List;
+import java.time.LocalDate;
+import java.util.UUID;
+
 
 @Service
 public class InsightsService {
@@ -28,8 +31,12 @@ public class InsightsService {
     @Transactional(readOnly = true)
     public MonthlyInsightsResponse monthly(String userId, YearMonth month) {
         String period = month.toString();
-        List<SpendTotal> byCategory = insightsRepository.totalsByCategory(userId, period);
-        List<SpendTotal> merchants = insightsRepository.topUpiMerchants(userId, period);
+        LocalDate monthStart = month.atDay(1);
+        LocalDate nextMonthStart = month.plusMonths(1).atDay(1);
+        UUID uid = UUID.fromString(userId);
+
+        List<SpendTotal> byCategory = insightsRepository.totalsByCategory(uid, monthStart, nextMonthStart);
+        List<SpendTotal> merchants = insightsRepository.topUpiMerchants(uid, monthStart, nextMonthStart);
 
         List<SpendTotal> expenses = byCategory.stream()
                 .filter(row -> TransactionType.EXPENSE.name().equals(row.getType()))

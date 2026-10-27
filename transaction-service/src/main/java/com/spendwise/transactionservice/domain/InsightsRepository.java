@@ -6,6 +6,7 @@ import org.springframework.data.repository.query.Param;
 
 import java.util.List;
 import java.util.UUID;
+import java.time.LocalDate;
 
 /**
  * Read-only aggregations behind the home screen's monthly insights card.
@@ -18,19 +19,23 @@ public interface InsightsRepository extends Repository<Transaction, UUID> {
             SELECT c.name AS label, t.type AS type, SUM(t.amount) AS total, COUNT(*) AS entries
             FROM transactions t
             JOIN categories c ON c.id = t.category_id
-            WHERE CAST(t.user_id AS varchar) = :userId
-              AND to_char(t.transaction_date, 'YYYY-MM') = :month
+            WHERE t.user_id = :userId
+              AND t.transaction_date >= :monthStart
+              AND t.transaction_date <  :nextMonthStart
               AND t.status = 'POSTED'
             GROUP BY c.name, t.type
             ORDER BY total DESC
             """, nativeQuery = true)
-    List<SpendTotal> totalsByCategory(@Param("userId") String userId, @Param("month") String month);
+    List<SpendTotal> totalsByCategory(@Param("userId") UUID userId,
+                                      @Param("monthStart") LocalDate monthStart,
+                                      @Param("nextMonthStart") LocalDate nextMonthStart);
 
     @Query(value = """
             SELECT split_part(t.description, '/', 2) AS label, t.type AS type, SUM(t.amount) AS total, COUNT(*) AS entries
             FROM transactions t
-            WHERE CAST(t.user_id AS varchar) = :userId
-              AND to_char(t.transaction_date, 'YYYY-MM') = :month
+            WHERE t.user_id = :userId
+              AND t.transaction_date >= :monthStart
+              AND t.transaction_date <  :nextMonthStart
               AND t.status = 'POSTED'
               AND t.type = 'EXPENSE'
               AND t.description LIKE 'UPI/%'
@@ -38,5 +43,7 @@ public interface InsightsRepository extends Repository<Transaction, UUID> {
             ORDER BY total DESC
             LIMIT 5
             """, nativeQuery = true)
-    List<SpendTotal> topUpiMerchants(@Param("userId") String userId, @Param("month") String month);
+    List<SpendTotal> topUpiMerchants(@Param("userId") UUID userId,
+                                     @Param("monthStart") LocalDate monthStart,
+                                     @Param("nextMonthStart") LocalDate nextMonthStart);
 }
