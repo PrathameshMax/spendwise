@@ -1,0 +1,107 @@
+=== 1. Running queries ===
+  pid  |     duration     |        state        | wait_event_type |  wait_event  |                                                     query                                                      
+-------+------------------+---------------------+-----------------+--------------+----------------------------------------------------------------------------------------------------------------
+ 69059 | 00:00:05.875256  | active              |                 |              | SELECT c.name AS label, t.type AS type, SUM(t.amount) AS total, COUNT(*) AS entries FROM transactions t JOIN c
+ 68983 | 00:00:05.775691  | active              |                 |              | SELECT c.name AS label, t.type AS type, SUM(t.amount) AS total, COUNT(*) AS entries FROM transactions t JOIN c
+ 69122 | 00:00:04.873729  | active              |                 |              | SELECT c.name AS label, t.type AS type, SUM(t.amount) AS total, COUNT(*) AS entries FROM transactions t JOIN c
+ 69835 | 00:00:02.828794  | active              |                 |              | SELECT c.name AS label, t.type AS type, SUM(t.amount) AS total, COUNT(*) AS entries FROM transactions t JOIN c
+ 68908 | 00:00:02.828794  | active              |                 |              | SELECT c.name AS label, t.type AS type, SUM(t.amount) AS total, COUNT(*) AS entries FROM transactions t JOIN c
+ 69110 | 00:00:02.686814  | active              |                 |              | SELECT c.name AS label, t.type AS type, SUM(t.amount) AS total, COUNT(*) AS entries FROM transactions t JOIN c
+ 69837 | 00:00:02.686814  | active              |                 |              | SELECT c.name AS label, t.type AS type, SUM(t.amount) AS total, COUNT(*) AS entries FROM transactions t JOIN c
+ 68954 | 00:00:02.568433  | active              | IO              | DataFileRead | SELECT c.name AS label, t.type AS type, SUM(t.amount) AS total, COUNT(*) AS entries FROM transactions t JOIN c
+ 69844 | 00:00:02.319666  | active              |                 |              | SELECT c.name AS label, t.type AS type, SUM(t.amount) AS total, COUNT(*) AS entries FROM transactions t JOIN c
+ 68818 | 00:00:02.319666  | active              |                 |              | SELECT c.name AS label, t.type AS type, SUM(t.amount) AS total, COUNT(*) AS entries FROM transactions t JOIN c
+ 69070 | 00:00:01.889689  | active              |                 |              | SELECT split_part(t.description, '/', 2) AS label, t.type AS type, SUM(t.amount) AS total, COUNT(*) AS entries
+ 69846 | 00:00:01.889689  | active              |                 |              | SELECT split_part(t.description, '/', 2) AS label, t.type AS type, SUM(t.amount) AS total, COUNT(*) AS entries
+ 69854 | -00:00:00.038932 | active              |                 |              | SELECT c.name AS label, t.type AS type, SUM(t.amount) AS total, COUNT(*) AS entries FROM transactions t JOIN c
+ 69855 | -00:00:00.038932 | active              |                 |              | SELECT c.name AS label, t.type AS type, SUM(t.amount) AS total, COUNT(*) AS entries FROM transactions t JOIN c
+ 68903 | -00:00:00.038932 | active              |                 |              | SELECT c.name AS label, t.type AS type, SUM(t.amount) AS total, COUNT(*) AS entries FROM transactions t JOIN c
+ 69335 | -00:00:00.117587 | idle in transaction |                 |              | select c1_0.id,c1_0.name,c1_0.system_default from categories c1_0 where c1_0.id=$1
+(16 rows)
+
+=== 2. Indexes on transactions ===
+                indexname                |                                                                               indexdef                                                                               
+-----------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ transactions_pkey                       | CREATE UNIQUE INDEX transactions_pkey ON public.transactions USING btree (id)
+ idx_transactions_user_id                | CREATE INDEX idx_transactions_user_id ON public.transactions USING btree (user_id)
+ idx_transactions_category_id            | CREATE INDEX idx_transactions_category_id ON public.transactions USING btree (category_id)
+ idx_transactions_transaction_date       | CREATE INDEX idx_transactions_transaction_date ON public.transactions USING btree (transaction_date)
+ uk_transactions_reverses_transaction_id | CREATE UNIQUE INDEX uk_transactions_reverses_transaction_id ON public.transactions USING btree (reverses_transaction_id) WHERE (reverses_transaction_id IS NOT NULL)
+(5 rows)
+
+ table_size | row_count 
+------------+-----------
+ 322 MB     |   1454679
+(1 row)
+
+=== 3a. Plan: totalsByCategory ===
+SET
+                                                                                                                                 QUERY PLAN                                                                                                                                 
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort  (cost=47001.33..47001.42 rows=36 width=265) (actual time=6631.861..6632.056 rows=12 loops=1)
+   Sort Key: (sum(t.amount)) DESC
+   Sort Method: quicksort  Memory: 25kB
+   Buffers: shared hit=16466 read=12647
+   ->  GroupAggregate  (cost=2277.87..47000.40 rows=36 width=265) (actual time=6630.699..6630.992 rows=12 loops=1)
+         Group Key: c.name, t.type
+         Buffers: shared hit=16463 read=12647
+         ->  Incremental Sort  (cost=2277.87..46999.59 rows=36 width=230) (actual time=6630.680..6630.928 rows=49 loops=1)
+               Sort Key: c.name, t.type
+               Presorted Key: c.name
+               Full-sort Groups: 2  Sort Method: quicksort  Average Memory: 26kB  Peak Memory: 26kB
+               Buffers: shared hit=16463 read=12647
+               ->  Nested Loop  (cost=1000.15..46997.97 rows=36 width=230) (actual time=6548.217..6630.712 rows=49 loops=1)
+                     Join Filter: (c.id = t.category_id)
+                     Rows Removed by Join Filter: 2205
+                     Buffers: shared hit=16460 read=12647
+                     ->  Index Scan using uk_categories_name on categories c  (cost=0.15..52.80 rows=310 width=234) (actual time=0.054..0.076 rows=46 loops=1)
+                           Buffers: shared hit=2
+                     ->  Materialize  (cost=1000.00..46777.86 rows=36 width=28) (actual time=142.351..144.134 rows=49 loops=46)
+                           Buffers: shared hit=16458 read=12647
+                           ->  Gather  (cost=1000.00..46777.68 rows=36 width=28) (actual time=6548.130..6629.837 rows=49 loops=1)
+                                 Workers Planned: 2
+                                 Workers Launched: 0
+                                 Buffers: shared hit=16458 read=12647
+                                 ->  Parallel Seq Scan on transactions t  (cost=0.00..45774.08 rows=15 width=28) (actual time=6545.856..6627.361 rows=49 loops=1)
+                                       Filter: (((status)::text = 'POSTED'::text) AND (((user_id)::character varying)::text = '1ab5eed0-0000-0001-0000-000000000000'::text) AND (to_char((transaction_date)::timestamp with time zone, 'YYYY-MM'::text) = '2026-10'::text))
+                                       Rows Removed by Filter: 1454630
+                                       Buffers: shared hit=16458 read=12647
+ Planning:
+   Buffers: shared hit=149 read=14
+ Planning Time: 5.104 ms
+ Execution Time: 6632.426 ms
+(32 rows)
+
+=== 3b. Plan: topUpiMerchants ===
+                                                                                                                                                                         QUERY PLAN                                                                                                                                                                         
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=49809.32..49809.33 rows=5 width=79) (actual time=4275.860..4276.085 rows=5 loops=1)
+   Buffers: shared hit=15801 read=13304
+   ->  Sort  (cost=49809.32..49809.39 rows=29 width=79) (actual time=4275.858..4276.081 rows=5 loops=1)
+         Sort Key: (sum(amount)) DESC
+         Sort Method: top-N heapsort  Memory: 25kB
+         Buffers: shared hit=15801 read=13304
+         ->  Finalize GroupAggregate  (cost=49805.09..49808.83 rows=29 width=79) (actual time=4275.664..4276.034 rows=22 loops=1)
+               Group Key: (split_part((description)::text, '/'::text, 2))
+               Buffers: shared hit=15801 read=13304
+               ->  Gather Merge  (cost=49805.09..49808.16 rows=24 width=79) (actual time=4275.645..4275.946 rows=22 loops=1)
+                     Workers Planned: 2
+                     Workers Launched: 0
+                     Buffers: shared hit=15801 read=13304
+                     ->  Partial GroupAggregate  (cost=48805.07..48805.37 rows=12 width=79) (actual time=4275.003..4275.078 rows=22 loops=1)
+                           Group Key: (split_part((description)::text, '/'::text, 2))
+                           Buffers: shared hit=15801 read=13304
+                           ->  Sort  (cost=48805.07..48805.10 rows=12 width=44) (actual time=4274.983..4274.990 rows=43 loops=1)
+                                 Sort Key: (split_part((description)::text, '/'::text, 2))
+                                 Sort Method: quicksort  Memory: 27kB
+                                 Buffers: shared hit=15801 read=13304
+                                 ->  Parallel Seq Scan on transactions t  (cost=0.00..48804.85 rows=12 width=44) (actual time=410.211..4274.889 rows=43 loops=1)
+                                       Filter: (((description)::text ~~ 'UPI/%'::text) AND ((status)::text = 'POSTED'::text) AND ((type)::text = 'EXPENSE'::text) AND (((user_id)::character varying)::text = '1ab5eed0-0000-0001-0000-000000000000'::text) AND (to_char((transaction_date)::timestamp with time zone, 'YYYY-MM'::text) = '2026-10'::text))
+                                       Rows Removed by Filter: 1454636
+                                       Buffers: shared hit=15801 read=13304
+ Planning:
+   Buffers: shared hit=22 read=6
+ Planning Time: 16.777 ms
+ Execution Time: 4276.363 ms
+(28 rows)
+

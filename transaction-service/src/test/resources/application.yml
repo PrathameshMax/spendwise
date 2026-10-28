@@ -4,3 +4,25 @@ spring:
       enabled: false
   config:
     import: ""
+  kafka:
+    listener:
+      auto-startup: false
+
+eureka:
+  client:
+    enabled: false
+
+spendwise:
+  exchange-rate:
+    base-url: http://localhost:0
+    connect-timeout-ms: 2000
+    read-timeout-ms: 1500
+  security:
+    user-context-secret: test-only-user-context-secret
+  kafka:
+    topics:
+      transaction-events: transaction-events
+      budget-events: budget-events
+  outbox:
+    publisher:
+      enabled: false

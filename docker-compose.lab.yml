@@ -29,6 +29,11 @@
 #
 # 4. Prometheus loads the lab alert rules (infra/prometheus/alerts-lab.yml).
 #
+# 5. traffic-simulator (k6, infra/traffic/mobile-app.js): steady mobile-app
+#    traffic against transaction-service. Opt-in through the "traffic"
+#    profile: ./scripts/lab.sh traffic-start / traffic-stop. Its own output
+#    carries no compose labels, so it is not shipped to Kibana or Splunk.
+#
 # Without this overlay, `docker compose up -d` behaves exactly as before.
 # =============================================================================
 
@@ -58,6 +63,11 @@ services:
     logging: *lab-logging
   schema-registry:
     logging: *lab-logging
+    environment:
+      # Its own health check (GET /subjects every 10s) produces two INFO lines
+      # each time: a request-log line and "Forwarded for header ...". WARN
+      # keeps real problems and drops that noise.
+      SCHEMA_REGISTRY_LOG4J_ROOT_LOGLEVEL: WARN
   redis:
     logging: *lab-logging
   prometheus:
@@ -125,3 +135,20 @@ services:
     environment:
       <<: *json-logs
       SPRING_PROFILES_ACTIVE: prod,lab
+
+  traffic-simulator:
+    image: grafana/k6:0.54.0
+    container_name: spendwise-traffic-simulator
+    profiles: ["traffic"]
+    command: ["run", "/scripts/mobile-app.js"]
+    environment:
+      TARGET: http://transaction-service:8083
+      LAB_USERS: ${LAB_USERS:-1000}
+      HOME_SCREEN_PER_MIN: ${HOME_SCREEN_PER_MIN:-90}
+      STATEMENT_PER_MIN: ${STATEMENT_PER_MIN:-120}
+    volumes:
+      - ./infra/traffic:/scripts:ro
+    depends_on:
+      transaction-service:
+        condition: service_healthy
+    restart: "no"

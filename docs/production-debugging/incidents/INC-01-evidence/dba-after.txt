@@ -1,0 +1,53 @@
+SET
+                                                                          QUERY PLAN                                                                           
+---------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort  (cost=49.21..49.30 rows=36 width=265) (actual time=5.584..5.587 rows=12 loops=1)
+   Sort Key: (sum(t.amount)) DESC
+   Sort Method: quicksort  Memory: 25kB
+   Buffers: shared hit=22
+   ->  HashAggregate  (cost=47.83..48.28 rows=36 width=265) (actual time=5.500..5.506 rows=12 loops=1)
+         Group Key: c.name, t.type
+         Batches: 1  Memory Usage: 24kB
+         Buffers: shared hit=19
+         ->  Hash Join  (cost=17.40..47.47 rows=36 width=230) (actual time=4.825..5.438 rows=49 loops=1)
+               Hash Cond: (t.category_id = c.id)
+               Buffers: shared hit=19
+               ->  Index Scan using idx_transactions_user_id on transactions t  (cost=0.43..30.40 rows=36 width=28) (actual time=4.721..5.321 rows=49 loops=1)
+                     Index Cond: (user_id = '1ab5eed0-0000-0001-0000-000000000000'::uuid)
+                     Filter: ((transaction_date >= '2026-10-01'::date) AND (transaction_date < '2026-11-01'::date) AND ((status)::text = 'POSTED'::text))
+                     Rows Removed by Filter: 629
+                     Buffers: shared hit=18
+               ->  Hash  (cost=13.10..13.10 rows=310 width=234) (actual time=0.059..0.060 rows=46 loops=1)
+                     Buckets: 1024  Batches: 1  Memory Usage: 11kB
+                     Buffers: shared hit=1
+                     ->  Seq Scan on categories c  (cost=0.00..13.10 rows=310 width=234) (actual time=0.020..0.024 rows=46 loops=1)
+                           Buffers: shared hit=1
+ Planning:
+   Buffers: shared hit=318
+ Planning Time: 4.323 ms
+ Execution Time: 5.795 ms
+(25 rows)
+
+                                                                                                                QUERY PLAN                                                                                                                
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=33.98..33.99 rows=5 width=79) (actual time=0.229..0.230 rows=5 loops=1)
+   Buffers: shared hit=18
+   ->  Sort  (cost=33.98..34.05 rows=29 width=79) (actual time=0.228..0.229 rows=5 loops=1)
+         Sort Key: (sum(amount)) DESC
+         Sort Method: top-N heapsort  Memory: 25kB
+         Buffers: shared hit=18
+         ->  HashAggregate  (cost=33.06..33.50 rows=29 width=79) (actual time=0.192..0.199 rows=22 loops=1)
+               Group Key: split_part((description)::text, '/'::text, 2)
+               Batches: 1  Memory Usage: 32kB
+               Buffers: shared hit=18
+               ->  Index Scan using idx_transactions_user_id on transactions t  (cost=0.43..32.85 rows=29 width=44) (actual time=0.141..0.163 rows=43 loops=1)
+                     Index Cond: (user_id = '1ab5eed0-0000-0001-0000-000000000000'::uuid)
+                     Filter: ((transaction_date >= '2026-10-01'::date) AND (transaction_date < '2026-11-01'::date) AND ((description)::text ~~ 'UPI/%'::text) AND ((status)::text = 'POSTED'::text) AND ((type)::text = 'EXPENSE'::text))
+                     Rows Removed by Filter: 635
+                     Buffers: shared hit=18
+ Planning:
+   Buffers: shared hit=50
+ Planning Time: 1.134 ms
+ Execution Time: 0.294 ms
+(19 rows)
+

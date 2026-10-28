@@ -53,8 +53,9 @@ tools. They are not used during an investigation unless the request was made.
 | Central logging (Splunk) | `infra/splunk/` | Same Fluent Bit pipeline -> Splunk HEC -> index `spendwise`, http://localhost:8000 (admin / SpendWiseLab#2026) |
 | Shared log pipeline | `infra/fluent-bit/pipeline.conf` | One reading/filtering/field-naming config for both platforms |
 | APM (AppDynamics) | `docker-compose.appd.yml`, `infra/appdynamics/` | SaaS trial controller; agent on api-gateway, transaction-service, notification-service |
+| Traffic | `infra/traffic/mobile-app.js` (k6), `lab.sh traffic-start/stop/status` | Steady mobile-app traffic for lab users: home screen and statement requests at a constant arrival rate; tunable with `HOME_SCREEN_PER_MIN`, `STATEMENT_PER_MIN`, `LAB_USERS` |
 | Requests | `postman/SpendWise.postman_collection.json` | Folder "Production Debugging Lab" |
-| Start / stop | `scripts/lab.sh` | `start`, `stop`, `status`, `kibana-start/stop/status`, `splunk-start/stop/status` |
+| Start / stop | `scripts/lab.sh` | `start`, `stop`, `status`, `traffic-*`, `kibana-*`, `splunk-*` |
 
 Run one log platform at a time on a 16 GB laptop: the app stack uses about
 7 GB, Elasticsearch + Kibana about 2.5 GB, Splunk about 2 GB. `lab.sh`
@@ -142,13 +143,22 @@ Faults for an incident arrive as a separate incident pack, applied without
 reading the diff, just as production changes arrive without the on-call
 engineer knowing what is wrong.
 
+### Running an incident pack
+
+1. Branch from `main` (`git checkout -b incident/inc-xx`) and merge the pack
+   there, without reading its diff. `main` stays clean until the fix exists.
+2. Follow the pack's setup steps (rebuild, traffic, data), then wait for the alert.
+3. Investigate, fix and verify on the incident branch; write the report in
+   `docs/production-debugging/incidents/`.
+4. Merge the branch into `main` (release + fix + report) and push.
+
 ## Tracker
 
 An incident is complete only after the investigation steps were performed and
 recovery was verified, not after reading an explanation.
 
 | ID | Tools used | Reproduced | Evidence | Root cause | Fix verified | Report | Interview story |
-|---|---|---|---|---|---|---|---|
-| INC-01 | | | | | | | |
+|---|---|-----|---|---|---|---|---|
+| INC-01 |Grafana, Prometheus alerts, Splunk, thread dump, EXPLAIN (DBA) | Yes |INC-01-evidence/ | Non-sargable predicates → full scans → pool exhaustion| Yes (plans + dashboards)| [report](incidents/INC-01-slow-insights-after-data-growth.md)|Pending |
 
 Reports go in `docs/production-debugging/incidents/INC-xx-<slug>.md`.
