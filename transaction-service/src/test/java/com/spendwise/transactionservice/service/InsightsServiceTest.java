@@ -15,7 +15,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class InsightsServiceTest {
 
-    private static final String USER = "3f2a9c1e-5b7d-4e8a-9c21-7d4e5f6a8b90";
+    private static final UUID USER = UUID.fromString("3f2a9c1e-5b7d-4e8a-9c21-7d4e5f6a8b90");
 
     @Test
     void splitsIncomeFromSpendingAndComputesCategoryShares() {
