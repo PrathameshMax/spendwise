@@ -2,6 +2,7 @@ package com.spendwise.transactionservice.api;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * The home screen's "This month" card: what came in, what went out, where it
@@ -9,7 +10,7 @@ import java.util.List;
  * the five UPI merchants the user paid most.
  */
 public record MonthlyInsightsResponse(
-        String userId,
+        UUID userId,
         String month,
         BigDecimal totalSpent,
         BigDecimal totalIncome,

@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.YearMonth;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/transactions/insights")
@@ -26,7 +27,7 @@ public class InsightsController {
      */
     @GetMapping("/monthly")
     public ResponseEntity<MonthlyInsightsResponse> monthly(
-            @RequestParam String userId,
+            @RequestParam UUID userId,
             @RequestParam @DateTimeFormat(pattern = "yyyy-MM") YearMonth month) {
         return ResponseEntity.ok(insightsService.monthly(userId, month));
     }
