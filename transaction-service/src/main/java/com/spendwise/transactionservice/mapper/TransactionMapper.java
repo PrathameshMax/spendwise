@@ -22,6 +22,5 @@ public interface TransactionMapper {
 
     @Mapping(source = "category.id", target = "categoryId")
     @Mapping(source = "category.name", target = "categoryName")
-    @Mapping(target = "merchant", ignore = true)
     TransactionResponse toResponse(Transaction transaction);
 }
