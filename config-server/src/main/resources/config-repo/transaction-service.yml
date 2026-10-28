@@ -26,6 +26,10 @@ spendwise:
       # Milestone 20 — transaction-events.DLT is created together with the main
       # topic (same partitions/replication) and keeps records for 30 days.
       dead-letter-retention: 30d
+  # Release 2026.10.29 — MerchantDirectory partner API (merchant name,
+  # category and logo on statement entries).
+  merchant-directory:
+    base-url: ${MERCHANT_DIRECTORY_URL:http://merchant-directory:8099}
 
 management:
   endpoint:
