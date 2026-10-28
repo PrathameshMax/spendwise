@@ -34,6 +34,11 @@
 #    profile: ./scripts/lab.sh traffic-start / traffic-stop. Its own output
 #    carries no compose labels, so it is not shipped to Kibana or Splunk.
 #
+# 6. merchant-directory (infra/partners/merchant_directory.py): stand-in for
+#    an external partner API, reachable at http://merchant-directory:8099 on
+#    the compose network. Like a real vendor it is outside the platform: no
+#    compose log labels (not shipped), no metrics, no host port.
+#
 # Without this overlay, `docker compose up -d` behaves exactly as before.
 # =============================================================================
 
@@ -152,3 +157,18 @@ services:
       transaction-service:
         condition: service_healthy
     restart: "no"
+
+  merchant-directory:
+    image: python:3.12.7-alpine
+    container_name: spendwise-merchant-directory
+    command: ["python", "-u", "/partners/merchant_directory.py"]
+    environment:
+      PORT: "8099"
+    volumes:
+      - ./infra/partners:/partners:ro
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+    restart: unless-stopped

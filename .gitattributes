@@ -6,3 +6,4 @@ infra/elk/** text eol=lf
 infra/splunk/** text eol=lf
 infra/fluent-bit/** text eol=lf
 infra/appdynamics/** text eol=lf
+infra/partners/** text eol=lf

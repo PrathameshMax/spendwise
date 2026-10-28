@@ -54,6 +54,7 @@ tools. They are not used during an investigation unless the request was made.
 | Shared log pipeline | `infra/fluent-bit/pipeline.conf` | One reading/filtering/field-naming config for both platforms |
 | APM (AppDynamics) | `docker-compose.appd.yml`, `infra/appdynamics/` | SaaS trial controller; agent on api-gateway, transaction-service, notification-service |
 | Traffic | `infra/traffic/mobile-app.js` (k6), `lab.sh traffic-start/stop/status` | Steady mobile-app traffic for lab users: home screen and statement requests at a constant arrival rate; tunable with `HOME_SCREEN_PER_MIN`, `STATEMENT_PER_MIN`, `LAB_USERS` |
+| External partners | `infra/partners/` (stand-ins, lab overlay) | Third-party APIs the platform depends on, e.g. MerchantDirectory at `http://merchant-directory:8099`. Outside the platform: no shipped logs, no metrics, no host port. Acting as the vendor goes through a request, like any action outside your own systems |
 | Requests | `postman/SpendWise.postman_collection.json` | Folder "Production Debugging Lab" |
 | Start / stop | `scripts/lab.sh` | `start`, `stop`, `status`, `traffic-*`, `kibana-*`, `splunk-*` |
 
