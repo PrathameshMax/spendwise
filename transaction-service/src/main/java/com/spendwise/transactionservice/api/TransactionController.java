@@ -1,6 +1,7 @@
 package com.spendwise.transactionservice.api;
 
 import com.spendwise.transactionservice.domain.TransactionType;
+import com.spendwise.transactionservice.service.StatementMerchantEnricher;
 import com.spendwise.transactionservice.service.TransactionService;
 import jakarta.validation.Valid;
 import org.springframework.data.domain.Page;
@@ -24,9 +25,12 @@ import java.util.UUID;
 public class TransactionController {
 
     private final TransactionService transactionService;
+    private final StatementMerchantEnricher statementMerchantEnricher;
 
-    public TransactionController(TransactionService transactionService) {
+    public TransactionController(TransactionService transactionService,
+                                 StatementMerchantEnricher statementMerchantEnricher) {
         this.transactionService = transactionService;
+        this.statementMerchantEnricher = statementMerchantEnricher;
     }
 
     @PostMapping
@@ -51,6 +55,6 @@ public class TransactionController {
 
         TransactionFilter filter = new TransactionFilter(
                 userId, categoryId, type, fromDate, toDate, minAmount, maxAmount);
-        return ResponseEntity.ok(transactionService.list(filter, pageable));
+        return ResponseEntity.ok(statementMerchantEnricher.enrich(transactionService.list(filter, pageable)));
     }
 }

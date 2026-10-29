@@ -26,6 +26,15 @@ spendwise:
       # Milestone 20 — transaction-events.DLT is created together with the main
       # topic (same partitions/replication) and keeps records for 30 days.
       dead-letter-retention: 30d
+  # Release 2026.10.29 — MerchantDirectory partner API (merchant name,
+  # category and logo on statement entries).
+  merchant-directory:
+    base-url: ${MERCHANT_DIRECTORY_URL:http://merchant-directory:8099}
+    # INC-05: explicit bounds on every partner call. The partner normally answers
+    # in ~100 ms; 1.5 s allows for its slow tail while capping how long a request
+    # thread can be held (threads held ≈ requests/s × seconds per call).
+    connect-timeout-ms: 1500
+    read-timeout-ms: 500
 
 management:
   endpoint:
@@ -33,3 +42,27 @@ management:
       group:
         readiness:
           include: readinessState,db
+
+
+
+# INC-05 fix (B): protection for the MerchantDirectory partner call.
+resilience4j:
+  circuitbreaker:
+    instances:
+      merchantDirectory:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 20                 # judge the partner on the last 20 calls (~10 s of statement traffic)
+        minimum-number-of-calls: 10             # never open on one or two unlucky calls
+        failure-rate-threshold: 50              # open when half of recent calls fail...
+        slow-call-duration-threshold: 1s        # ...or when calls succeed but take > 1 s (normal is ~100 ms)
+        slow-call-rate-threshold: 50
+        wait-duration-in-open-state: 30s        # stop calling for 30 s, then probe
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+        ignore-exceptions:
+          - io.github.resilience4j.bulkhead.BulkheadFullException   # our own limit, not a partner failure
+  bulkhead:
+    instances:
+      merchantDirectory:
+        max-concurrent-calls: 10                # healthy need: 2 req/s × 0.1 s ≈ 1 concurrent call; 10 is ample headroom
+        max-wait-duration: 0                    # never queue: over the limit → fallback immediately

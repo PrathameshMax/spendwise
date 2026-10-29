@@ -22,5 +22,16 @@ public record TransactionResponse(
         BigDecimal baseCurrencyAmount,
         TransactionStatus status,
         UUID reversesTransactionId,
-        String reversalReason) {
+        String reversalReason,
+        MerchantDetails merchant) {
+
+    /**
+     * Same entry with merchant display details from MerchantDirectory; null
+     * when the entry has no merchant or the partner had no details.
+     */
+    public TransactionResponse withMerchant(MerchantDetails merchant) {
+        return new TransactionResponse(id, userId, categoryId, categoryName, amount, type, description,
+                transactionDate, createdAt, currency, baseCurrencyAmount, status, reversesTransactionId,
+                reversalReason, merchant);
+    }
 }
