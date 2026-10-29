@@ -30,6 +30,11 @@ spendwise:
   # category and logo on statement entries).
   merchant-directory:
     base-url: ${MERCHANT_DIRECTORY_URL:http://merchant-directory:8099}
+    # INC-05: explicit bounds on every partner call. The partner normally answers
+    # in ~100 ms; 1.5 s allows for its slow tail while capping how long a request
+    # thread can be held (threads held ≈ requests/s × seconds per call).
+    connect-timeout-ms: 1500
+    read-timeout-ms: 500
 
 management:
   endpoint:

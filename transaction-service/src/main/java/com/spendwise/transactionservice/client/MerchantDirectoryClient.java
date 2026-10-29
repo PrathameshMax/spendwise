@@ -4,10 +4,14 @@ import com.spendwise.transactionservice.api.MerchantDetails;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.MediaType;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
-import org.springframework.web.client.RestTemplate;
 
+import java.net.http.HttpClient;
+import java.time.Duration;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
@@ -27,12 +31,24 @@ public class MerchantDirectoryClient {
 
     private static final Logger log = LoggerFactory.getLogger(MerchantDirectoryClient.class);
 
-    private final RestTemplate restTemplate = new RestTemplate();
-    private final String baseUrl;
+    private final RestClient restClient;
 
-    public MerchantDirectoryClient(
-            @Value("${spendwise.merchant-directory.base-url:http://merchant-directory:8099}") String baseUrl) {
-        this.baseUrl = baseUrl;
+    public MerchantDirectoryClient(RestClient.Builder restClientBuilder,
+                                     @Value("${spendwise.merchant-directory.base-url:http://merchant-directory:8099}") String baseUrl,
+                                     @Value("${spendwise.merchant-directory.connect-timeout-ms:500}") long connectTimeoutMs,
+                                     @Value("${spendwise.merchant-directory.connect-timeout-ms:1500}") long readTimeoutMs) {
+        HttpClient httpClient = HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)
+                .connectTimeout(Duration.ofMillis(connectTimeoutMs))
+                .build();
+
+        JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory();
+        requestFactory.setReadTimeout(Duration.ofMillis(readTimeoutMs));
+
+        this.restClient = restClientBuilder
+                .baseUrl(baseUrl)
+                .requestFactory(requestFactory)
+                .build();
     }
 
     /**
@@ -45,10 +61,13 @@ public class MerchantDirectoryClient {
             return Map.of();
         }
         try {
-            MerchantLookupResponse response = restTemplate.postForObject(
-                    baseUrl + "/v1/merchants/lookup",
-                    new MerchantLookupRequest(List.copyOf(names)),
-                    MerchantLookupResponse.class);
+            MerchantLookupResponse response = restClient.post()
+                    .uri("/v1/merchants/lookup")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(new MerchantLookupRequest(List.copyOf(names)))
+                    .retrieve()
+                    .body(MerchantLookupResponse.class);
+
             if (response == null || response.merchants() == null) {
                 return Map.of();
             }

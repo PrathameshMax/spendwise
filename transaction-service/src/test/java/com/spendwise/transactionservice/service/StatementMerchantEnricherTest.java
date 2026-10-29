@@ -8,6 +8,7 @@ import com.spendwise.transactionservice.domain.TransactionType;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
+import org.springframework.web.client.RestClient;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -88,7 +89,7 @@ class StatementMerchantEnricherTest {
         private final List<List<String>> calls = new ArrayList<>();
 
         private RecordingClient(Map<String, MerchantDetails> directory) {
-            super("http://merchant-directory.test");
+            super(RestClient.builder(), "http://merchant-directory.test", 500, 1500);
             this.directory = directory;
         }
 
