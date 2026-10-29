@@ -42,3 +42,27 @@ management:
       group:
         readiness:
           include: readinessState,db
+
+
+
+# INC-05 fix (B): protection for the MerchantDirectory partner call.
+resilience4j:
+  circuitbreaker:
+    instances:
+      merchantDirectory:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 20                 # judge the partner on the last 20 calls (~10 s of statement traffic)
+        minimum-number-of-calls: 10             # never open on one or two unlucky calls
+        failure-rate-threshold: 50              # open when half of recent calls fail...
+        slow-call-duration-threshold: 1s        # ...or when calls succeed but take > 1 s (normal is ~100 ms)
+        slow-call-rate-threshold: 50
+        wait-duration-in-open-state: 30s        # stop calling for 30 s, then probe
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+        ignore-exceptions:
+          - io.github.resilience4j.bulkhead.BulkheadFullException   # our own limit, not a partner failure
+  bulkhead:
+    instances:
+      merchantDirectory:
+        max-concurrent-calls: 10                # healthy need: 2 req/s × 0.1 s ≈ 1 concurrent call; 10 is ample headroom
+        max-wait-duration: 0                    # never queue: over the limit → fallback immediately
