@@ -421,6 +421,10 @@ services:
       # decision rolls back and is redelivered), and a consumed record whose
       # schema cannot be fetched is retried every 5 s, not dead-lettered
       # (spendwise-common's DeserializationFailureBackOff).
+
+      # CR-2 — merchant-details cache. Deliberately no depends_on redis: the
+      # cache is optional, so transaction-service must start and serve without it.
+      REDIS_HOST: redis
     depends_on:
       config-server:
         condition: service_healthy
