@@ -30,7 +30,7 @@ import java.util.Map;
 public class MerchantDetailsCache {
 
     private static final Logger log = LoggerFactory.getLogger(MerchantDetailsCache.class);
-    private static final String KEY_PREFIX = "merchant-directory:v1";
+    private static final String KEY_PREFIX = "merchant-directory:v1:";
 
     private final StringRedisTemplate redis;
     private final ObjectMapper objectMapper;
