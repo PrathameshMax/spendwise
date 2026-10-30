@@ -158,3 +158,67 @@ Zipkin traces, transaction-service ERROR logs (`CancellationException`).
 
 This incident was reproduced in a personal lab built to practise production
 debugging. Describe it as such.
+
+## Addendum: CR-2 (cache-aside, kill switch, health-check fix)
+
+Implements action items 2 (cache-aside with TTL) and 3 (kill switch).
+
+### Changes
+
+- **Cache-aside in Redis.** One `MGET` per statement page; MerchantDirectory is
+  called only for cache misses; fetched details are written back with a 24 h TTL.
+  Keys: `merchant-directory:v1:<CODE>` (versioned prefix).
+- **Fail-open cache.** Any Redis or serialization failure is a cache miss (read)
+  or a skipped write. Redis connect and command timeouts are 200 ms, and Lettuce
+  `REJECT_COMMANDS` makes a down Redis fail immediately instead of queueing.
+- **Kill switch** `spendwise.merchant-directory.enrichment-enabled`, read per
+  request, so a config change plus `POST /actuator/refresh` applies it without a
+  restart.
+- **Health check.** Redis excluded from transaction-service's health status: an
+  optional, fail-open dependency must not mark a working service DOWN.
+- **Config drift fixed.** Since CR-1 the config repo served connect 1500 ms /
+  read 500 ms, the reverse of the change request (connect 500 / read 1500).
+  Found by querying the config server; corrected in CR-2.
+
+### Defects found during CR-2 testing
+
+1. **Cache ignored, partner called twice per page.** Caught by three failing unit
+   tests (cache hit still fetched, nothing written back, two partner calls for a
+   fully cached page). Cause: the old direct partner call was left in the
+   enricher next to the new cache logic. Fixed by replacing the class.
+2. **Key prefix missing `:`.** `SCAN merchant-directory:v1:*` returned 0 while the
+   cache held 52 keys (`merchant-directory:v1ZOMATO`). The cache worked, but the
+   namespace was broken. Fixed; the corrected prefix acted as a whole-cache
+   invalidation, the old keys expiring through their TTL.
+
+### Evidence
+
+| Experiment | Result |
+|---|---|
+| Partner healthy, cache warm | ~2 statements/s, ~0.09 partner calls/s (~95% served from cache); statement 200 in 35 ms with merchant details; 5xx 0% |
+| E1: partner down, cache warm | [fill: logos shown for which merchants; partner calls/s; statement p95; circuit state] |
+| E2: Redis down | [fill: statement status and time; health endpoint before the fix (status/HTTP code) and after the fix] |
+| E3: kill switch off then on | [fill: refresh response (changed keys); `mget` calls stopped; `merchant` null; no restart] |
+
+### Concepts demonstrated with evidence
+
+- **Cache-aside with TTL:** the partner is called for misses only; during a
+  partner outage cached merchants keep their details.
+- **Versioned keys as invalidation:** changing the prefix invalidates the whole
+  cache safely; old entries expire through their TTL.
+- **Health-check design:** an optional dependency (cache) must not take part in a
+  service's health status, or probes restart a service that is working.
+- **Kill switch:** operations can turn the feature off at runtime, without a deploy
+  or restart.
+- **Config drift:** what the config server serves is the source of truth for
+  what runs. Verify it after every config change.
+
+### Remaining action items
+
+| # | Action | Status |
+|---|---|---|
+| 4 | Actuator on a separate management port | CR-3 |
+| 5 | Review checklist for outbound calls (timeouts, bounded concurrency, fallback) | Open |
+| 6 | Restart policy `unless-stopped` for infrastructure containers | Open |
+| 7 | Resilience tests with dependencies slow, down and erroring | Partly done (CR-1, CR-2 experiments) |
+| 8 | Understand: why not retry here | Open |
