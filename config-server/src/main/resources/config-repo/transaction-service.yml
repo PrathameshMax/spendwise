@@ -51,6 +51,10 @@ spendwise:
 management:
   endpoint:
     health:
+      redis:
+        # CR-2: Redis is an optional cache (fail-open). Its outage must not mark
+        # transaction-service DOWN, or probes would restart a working service.
+        enabled: false
       group:
         readiness:
           include: readinessState,db
