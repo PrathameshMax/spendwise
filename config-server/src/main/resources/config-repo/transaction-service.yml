@@ -3,6 +3,13 @@ spring:
     url: jdbc:postgresql://${DB_HOST:localhost}:5432/transaction_db
     username: ${DB_USERNAME:spendwise}
     password: ${DB_PASSWORD:spendwise}
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: 6379
+      # A cache lookup must never cost more than skipping the cache.
+      connect-timeout: 200ms
+      timeout: 200ms
   flyway:
     enabled: true
   # Producer settings (acks=all, idempotence, bounded timeouts, KafkaTemplate
@@ -33,8 +40,13 @@ spendwise:
     # INC-05: explicit bounds on every partner call. The partner normally answers
     # in ~100 ms; 1.5 s allows for its slow tail while capping how long a request
     # thread can be held (threads held ≈ requests/s × seconds per call).
-    connect-timeout-ms: 1500
-    read-timeout-ms: 500
+    connect-timeout-ms: 500
+    read-timeout-ms: 1500
+    # CR-2: kill switch for the whole feature (no cache, no partner when false).
+    # Changeable at runtime: config change + POST /actuator/refresh.
+    enrichment-enabled: true
+    # CR-2: merchant details change rarely; 24 h keeps logos during partner outages.
+    cache-ttl: 24h
 
 management:
   endpoint:

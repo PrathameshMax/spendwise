@@ -48,7 +48,7 @@ public class MerchantDirectoryClient {
                 .connectTimeout(Duration.ofMillis(connectTimeoutMs))
                 .build();
 
-        JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory();
+        JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
         requestFactory.setReadTimeout(Duration.ofMillis(readTimeoutMs));
 
         this.restClient = restClientBuilder

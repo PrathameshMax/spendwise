@@ -1,16 +1,20 @@
 package com.spendwise.transactionservice.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.spendwise.transactionservice.api.MerchantDetails;
 import com.spendwise.transactionservice.api.TransactionResponse;
+import com.spendwise.transactionservice.cache.MerchantDetailsCache;
 import com.spendwise.transactionservice.client.MerchantDirectoryClient;
 import com.spendwise.transactionservice.domain.TransactionStatus;
 import com.spendwise.transactionservice.domain.TransactionType;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
+import org.springframework.mock.env.MockEnvironment;
 import org.springframework.web.client.RestClient;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -40,20 +44,65 @@ class StatementMerchantEnricherTest {
     }
 
     @Test
-    void enrichesEntriesWithOneLookupPerPage() {
+    void emptyCacheFetchesAllCodesInOneLookupAndCachesThem() {
         RecordingClient client = new RecordingClient(Map.of("BIGBASKET", BIGBASKET, "MSEDCL", MSEDCL));
+        InMemoryCache cache = new InMemoryCache();
         Page<TransactionResponse> page = new PageImpl<>(List.of(
                 entry("UPI/BIGBASKET/411236721/GPay"),
                 entry("UPI/BIGBASKET/411236799/PhonePe"),
                 entry("BBPS/MSEDCL/ELECTRICITY BILL"),
                 entry("NEFT/SALARY OCT-2026/INFOSYS LTD")));
 
-        Page<TransactionResponse> enriched = new StatementMerchantEnricher(client).enrich(page);
+        Page<TransactionResponse> enriched = enricher(client, cache, true).enrich(page);
 
         assertThat(client.calls).hasSize(1);
         assertThat(client.calls.get(0)).containsExactly("BIGBASKET", "MSEDCL");
+        assertThat(cache.store).containsKeys("BIGBASKET", "MSEDCL");
         assertThat(enriched.getContent()).extracting(TransactionResponse::merchant)
                 .containsExactly(BIGBASKET, BIGBASKET, MSEDCL, null);
+    }
+
+    @Test
+    void cachedMerchantsAreNotFetchedFromThePartner() {
+        RecordingClient client = new RecordingClient(Map.of("BIGBASKET", BIGBASKET, "MSEDCL", MSEDCL));
+        InMemoryCache cache = new InMemoryCache();
+        cache.store.put("BIGBASKET", BIGBASKET);
+        Page<TransactionResponse> page = new PageImpl<>(List.of(
+                entry("UPI/BIGBASKET/411236721/GPay"),
+                entry("BBPS/MSEDCL/ELECTRICITY BILL")));
+
+        Page<TransactionResponse> enriched = enricher(client, cache, true).enrich(page);
+
+        assertThat(client.calls).hasSize(1);
+        assertThat(client.calls.get(0)).containsExactly("MSEDCL");
+        assertThat(enriched.getContent()).extracting(TransactionResponse::merchant).containsExactly(BIGBASKET, MSEDCL);
+    }
+
+    @Test
+    void fullyCachedPageMakesNoPartnerCall() {
+        RecordingClient client = new RecordingClient(Map.of());
+        InMemoryCache cache = new InMemoryCache();
+        cache.store.put("BIGBASKET", BIGBASKET);
+        Page<TransactionResponse> page = new PageImpl<>(List.of(entry("UPI/BIGBASKET/411236721/GPay")));
+
+        Page<TransactionResponse> enriched = enricher(client, cache, true).enrich(page);
+
+        assertThat(client.calls).isEmpty();
+        assertThat(enriched.getContent()).extracting(TransactionResponse::merchant).containsExactly(BIGBASKET);
+    }
+
+    @Test
+    void killSwitchOffSkipsCacheAndPartner() {
+        RecordingClient client = new RecordingClient(Map.of("BIGBASKET", BIGBASKET));
+        InMemoryCache cache = new InMemoryCache();
+        cache.store.put("BIGBASKET", BIGBASKET);
+        Page<TransactionResponse> page = new PageImpl<>(List.of(entry("UPI/BIGBASKET/411236721/GPay")));
+
+        Page<TransactionResponse> enriched = enricher(client, cache, false).enrich(page);
+
+        assertThat(client.calls).isEmpty();
+        assertThat(cache.reads).isZero();
+        assertThat(enriched.getContent()).extracting(TransactionResponse::merchant).containsExactly((MerchantDetails) null);
     }
 
     @Test
@@ -61,19 +110,27 @@ class StatementMerchantEnricherTest {
         RecordingClient client = new RecordingClient(Map.of());
         Page<TransactionResponse> page = new PageImpl<>(List.of(entry("UPI/SWIGGY/411236721/GPay")));
 
-        Page<TransactionResponse> enriched = new StatementMerchantEnricher(client).enrich(page);
+        Page<TransactionResponse> enriched = enricher(client, new InMemoryCache(), true).enrich(page);
 
         assertThat(enriched.getContent()).extracting(TransactionResponse::merchant).containsExactly((MerchantDetails) null);
     }
 
     @Test
-    void skipsPartnerCallWhenNoEntryHasAMerchant() {
+    void skipsCacheAndPartnerWhenNoEntryHasAMerchant() {
         RecordingClient client = new RecordingClient(Map.of());
+        InMemoryCache cache = new InMemoryCache();
         Page<TransactionResponse> page = new PageImpl<>(List.of(entry("ATM WDL/HDFC ATM/Pune")));
 
-        new StatementMerchantEnricher(client).enrich(page);
+        enricher(client, cache, true).enrich(page);
 
         assertThat(client.calls).isEmpty();
+        assertThat(cache.reads).isZero();
+    }
+
+    private static StatementMerchantEnricher enricher(RecordingClient client, InMemoryCache cache, boolean enabled) {
+        MockEnvironment environment = new MockEnvironment()
+                .withProperty(StatementMerchantEnricher.ENRICHMENT_ENABLED, String.valueOf(enabled));
+        return new StatementMerchantEnricher(client, cache, environment);
     }
 
     private static TransactionResponse entry(String description) {
@@ -104,6 +161,34 @@ class StatementMerchantEnricherTest {
                 }
             }
             return found;
+        }
+    }
+
+    private static final class InMemoryCache extends MerchantDetailsCache {
+
+        private final Map<String, MerchantDetails> store = new HashMap<>();
+        private int reads;
+
+        private InMemoryCache() {
+            super(null, new ObjectMapper(), Duration.ofHours(24));
+        }
+
+        @Override
+        public Map<String, MerchantDetails> getAll(Collection<String> merchantCodes) {
+            reads++;
+            Map<String, MerchantDetails> hits = new HashMap<>();
+            for (String code : merchantCodes) {
+                MerchantDetails details = store.get(code);
+                if (details != null) {
+                    hits.put(code, details);
+                }
+            }
+            return hits;
+        }
+
+        @Override
+        public void putAll(Map<String, MerchantDetails> merchants) {
+            store.putAll(merchants);
         }
     }
 }
