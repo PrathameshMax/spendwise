@@ -1,0 +1,35 @@
+# Rendered by the nginx image at startup: /etc/nginx/templates/*.template ->
+# /etc/nginx/conf.d/ with ${GATEWAY_URL} and ${KEYCLOAK_URL} from the container
+# environment (only variables that are set get substituted, so $uri stays).
+server {
+    listen 8080;
+    server_name _;
+    root /usr/share/nginx/html;
+    server_tokens off;
+
+    # The SPA may only talk to the gateway; forms may only post to the gateway,
+    # whose /logout redirects through Keycloak and back here.
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' ${GATEWAY_URL}; form-action 'self' ${GATEWAY_URL} ${KEYCLOAK_URL}; frame-ancestors 'none'; base-uri 'none'; object-src 'none'" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "no-referrer" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+
+    location = /healthz {
+        access_log off;
+        default_type text/plain;
+        return 200 "ok\n";
+    }
+
+    # Content-hashed bundles from `vite build`: safe to cache for a year.
+    location /assets/ {
+        expires 1y;
+        try_files $uri =404;
+    }
+
+    # Every other path renders the SPA, which shows its own "Page not found".
+    location / {
+        expires -1;
+        try_files $uri /index.html;
+    }
+}

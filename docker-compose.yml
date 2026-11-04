@@ -777,6 +777,31 @@ services:
           cpus: "1.0"
           memory: 512M
 
+  # SpendWise web app (React SPA on nginx). The gateway sends the browser
+  # here after login/logout (spa-base-url) and allows only this origin for
+  # CORS. It talks to nothing but the gateway: session cookie, no tokens in
+  # the browser. No depends_on on purpose: with the gateway down the page
+  # shows "Cannot reach the API gateway" instead of not starting at all.
+  web:
+    build:
+      context: ./spendwise-web
+      args:
+        VITE_GATEWAY_URL: http://localhost:8080
+        VITE_KEYCLOAK_ACCOUNT_URL: http://localhost:8180/realms/spendwise/account
+    container_name: spendwise-web
+    ports:
+      - "5173:8080"
+    environment:
+      # Rendered into the nginx Content-Security-Policy (connect-src, form-action).
+      GATEWAY_URL: http://localhost:8080
+      KEYCLOAK_URL: http://localhost:8180
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 64M
+
 volumes:
   spendwise-postgres-data:
   spendwise-grafana-data:
