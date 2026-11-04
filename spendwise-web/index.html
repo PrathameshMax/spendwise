@@ -3,7 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="referrer" content="no-referrer" />
+    <!-- Not no-referrer: with it, browsers send "Origin: null" on the cross-origin
+         sign-out form POST and the gateway's CORS filter rejects it with 403.
+         Cross-origin requests still carry only the origin, never the path. -->
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>SpendWise</title>
   </head>
