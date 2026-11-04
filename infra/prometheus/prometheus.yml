@@ -22,9 +22,6 @@ scrape_configs:
       - targets: ["api-gateway:8080"]
         labels:
           service: api-gateway
-      - targets: ["auth-service:8081"]
-        labels:
-          service: auth-service
       - targets: ["user-service:8082"]
         labels:
           service: user-service

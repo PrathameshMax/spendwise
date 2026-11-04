@@ -9,7 +9,6 @@ spendwise:
     # service become separate containers — "localhost" inside a container
     # means that container itself, never a sibling one.
     routes:
-      auth-service: http://${AUTH_SERVICE_HOST:localhost}:8081
       user-service: http://${USER_SERVICE_HOST:localhost}:8082
       transaction-service: http://${TRANSACTION_SERVICE_HOST:localhost}:8083
       budget-service: http://${BUDGET_SERVICE_HOST:localhost}:8084
@@ -29,10 +28,57 @@ spendwise:
   rate-limit:
     trusted-proxy-hops: 1
   security:
-    jwk-set-uri: http://${AUTH_SERVICE_HOST:localhost}:8081/oauth2/jwks
-    refresh-cookie-name: spendwise_refresh_token
-    refresh-cookie-path: /api/v1/auth/refresh
-    refresh-cookie-max-age-seconds: 604800
+    # Hop ① / ② — the gateway is the OIDC client (backend-for-frontend) and the
+    # public front door. public-url is what the browser and the token's iss use;
+    # internal-url is how this container reaches Keycloak for token exchange
+    # and JWKS. The client secret comes from the environment (Vault in a real
+    # deployment), never from this file.
+    keycloak:
+      public-url: ${KEYCLOAK_PUBLIC_URL:http://localhost:8180}
+      internal-url: ${KEYCLOAK_INTERNAL_URL:http://localhost:8180}
+      realm: spendwise
+      registration-id: keycloak
+      client-id: spendwise-bff
+      client-secret: ${SPENDWISE_BFF_CLIENT_SECRET:}
+      scopes: openid, profile, email
+    spa-base-url: ${SPA_BASE_URL:http://localhost:5173}
+    # Explicit CORS allow-list: credentials (the session cookie) are allowed,
+    # so origins can never be "*".
+    cors:
+      allowed-origins:
+        - ${SPA_BASE_URL:http://localhost:5173}
+      max-age: 1h
+    max-request-size: 1MB
+    expose-api-docs: false
+    jwt:
+      audience: spendwise-api
+      accepted-token-type: Bearer
+      clock-skew: 30s
+      max-token-lifetime: 1h
+      realm: spendwise
+    jwks:
+      refresh-interval: 5m
+      unknown-kid-cooldown: 15s
+      connect-timeout: 2s
+      read-timeout: 2s
+      fetch-timeout: 3s
+      unavailable-retry-after: 5s
+
+server:
+  # Oversized headers are rejected by Netty before any filter runs.
+  max-http-request-header-size: 16KB
+  reactive:
+    session:
+      # BFF session: the only thing the browser holds. HttpOnly (no JavaScript
+      # access), Secure, SameSite=Lax (sent on the top-level redirect back from
+      # Keycloak, not on cross-site sub-requests). Stored in Redis.
+      timeout: 30m
+      cookie:
+        name: SPENDWISE_SESSION
+        http-only: true
+        secure: ${SESSION_COOKIE_SECURE:true}
+        same-site: lax
+        path: /
 
 springdoc:
   swagger-ui:
@@ -41,8 +87,6 @@ springdoc:
     # routes (avoids the cross-origin fetch Swagger UI's browser JS would
     # otherwise need to make against each service's own port).
     urls:
-      - name: auth-service
-        url: /v3/api-docs/auth-service
       - name: user-service
         url: /v3/api-docs/user-service
       - name: transaction-service
@@ -55,6 +99,9 @@ springdoc:
         url: /v3/api-docs/analytics-service
 
 spring:
+  session:
+    redis:
+      namespace: spendwise:gateway:session
   webflux:
     # api-gateway has no custom @RestController of its own throwing SpendWiseException
     # types, so it doesn't need a servlet-only @RestControllerAdvice like the

@@ -2,3 +2,7 @@ com.spendwise.common.health.SpendwiseHealthAutoConfiguration
 com.spendwise.common.observability.SpendwiseObservationAutoConfiguration
 com.spendwise.common.tracing.SpendwiseFeignTracingAutoConfiguration
 com.spendwise.common.messaging.SpendwiseKafkaConsumerAutoConfiguration
+com.spendwise.common.security.SpendwiseResourceServerAutoConfiguration
+com.spendwise.common.security.SpendwiseReactiveResourceServerAutoConfiguration
+com.spendwise.common.security.SpendwiseServiceTokenAutoConfiguration
+com.spendwise.common.crypto.SpendwiseFieldEncryptionAutoConfiguration

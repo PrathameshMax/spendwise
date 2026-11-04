@@ -5,6 +5,9 @@ spring:
     password: ${DB_PASSWORD:spendwise}
   flyway:
     enabled: true
+    # With Vault database credentials the login is a short-lived member of the
+    # schema-owner role; switching to that role keeps new objects owned by it.
+    init-sqls: SET ROLE spendwise
 
 management:
   endpoint:
@@ -12,3 +15,8 @@ management:
       group:
         readiness:
           include: readinessState,db
+
+spendwise:
+  users:
+    # Preferred currency given to a profile provisioned at first login.
+    default-currency: INR

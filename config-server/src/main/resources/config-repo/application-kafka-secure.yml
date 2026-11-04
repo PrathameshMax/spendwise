@@ -1,0 +1,15 @@
+# Activated with the "kafka-secure" profile (docker-compose.kafka-secure.yml).
+# Every Kafka client authenticates as its own principal over TLS; topic ACLs on
+# the brokers decide what that principal may read and write. The SASL password
+# arrives via KAFKA_SASL_PASSWORD (Vault-sourced in a real deployment).
+spring:
+  kafka:
+    security:
+      protocol: SASL_SSL
+    ssl:
+      trust-store-location: file:/etc/kafka/secrets/kafka.truststore.pem
+      trust-store-type: PEM
+    properties:
+      sasl.mechanism: PLAIN
+      sasl.jaas.config: org.apache.kafka.common.security.plain.PlainLoginModule required username="${KAFKA_SASL_USERNAME}" password="${KAFKA_SASL_PASSWORD}";
+      ssl.endpoint.identification.algorithm: https

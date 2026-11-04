@@ -13,8 +13,9 @@
     <artifactId>spendwise-common</artifactId>
     <packaging>jar</packaging>
     <name>SpendWise :: Common</name>
-    <description>Cross-cutting DTOs, exception types, correlation-ID filter, the signed
-        user-context filter (Milestone 6), the shared RFC 7807 ProblemDetail exception
+    <description>Cross-cutting DTOs, exception types, correlation-ID filter, the application
+        security platform (resource server, Keycloak authorities, token relay, field
+        encryption, PII masking), the shared RFC 7807 ProblemDetail exception
         handler (Milestone 7), and the shared Bean Validation groups and custom currency
         constraint (Milestone 8) shared by every service</description>
 
@@ -130,6 +131,49 @@
             <groupId>io.micrometer</groupId>
             <artifactId>micrometer-core</artifactId>
             <optional>true</optional>
+        </dependency>
+        <!-- Application security platform: resource-server auto-configuration
+             (servlet + reactive), Keycloak authority mapping, RFC 7807 401/403,
+             Feign token relay and client-credentials service tokens. Optional:
+             each service opts in by declaring spring-boot-starter-oauth2-resource-server
+             (and -oauth2-client for service-to-service calls) itself; the
+             auto-configurations are @ConditionalOnClass on these types. -->
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-config</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-oauth2-resource-server</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-oauth2-jose</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-oauth2-client</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <!-- Field-level AES-GCM encryption is exposed as a JPA AttributeConverter. -->
+        <dependency>
+            <groupId>jakarta.persistence</groupId>
+            <artifactId>jakarta.persistence-api</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <!-- PII masking message converter registered in the shared logback-spring.xml. -->
+        <dependency>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 </project>

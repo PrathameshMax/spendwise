@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Shared by every SpendWise service (picked up from the spendwise-common jar when
+  a service has no logback-spring.xml of its own). Output is what Spring Boot
+  would produce by default — the console pattern with logging.pattern.correlation,
+  or structured JSON when logging.structured.format.console is set (the debugging
+  lab uses ECS) — except that every line passes through PiiMaskingEncoder, so
+  emails, account numbers, bearer tokens and JWTs are masked before Splunk / ELK
+  ingest them.
+-->
+<configuration>
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+            <level>${CONSOLE_LOG_THRESHOLD}</level>
+        </filter>
+        <encoder class="com.spendwise.common.logging.PiiMaskingEncoder">
+            <pattern>${CONSOLE_LOG_PATTERN}</pattern>
+            <structuredFormat>${CONSOLE_LOG_STRUCTURED_FORMAT:-}</structuredFormat>
+            <charset>${CONSOLE_LOG_CHARSET}</charset>
+        </encoder>
+    </appender>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+</configuration>

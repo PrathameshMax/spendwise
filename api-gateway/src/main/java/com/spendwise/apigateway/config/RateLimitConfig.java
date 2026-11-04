@@ -98,11 +98,11 @@ public class RateLimitConfig {
      * network location. {@code exchange.getPrincipal()} is populated by Spring
      * Security's WebFilter chain, which runs before any Gateway filter.
      *
-     * <p><b>IP for everything without a principal.</b> {@code POST
-     * /api/v1/auth/login} and {@code /register} are {@code permitAll()} — the
-     * brute-force targets Milestone 14 exists to protect — and carry no
-     * principal, so they fall through to {@code ip:<address>}. The {@code user:}
-     * / {@code ip:} prefixes keep the two key spaces from ever colliding.
+     * <p><b>IP for everything without a principal.</b> Unauthenticated traffic
+     * (login itself is Keycloak's, protected there by brute-force lockout)
+     * carries no principal, so it falls through to {@code ip:<address>}. The
+     * {@code user:} / {@code ip:} prefixes keep the two key spaces from ever
+     * colliding.
      *
      * <p><b>X-Forwarded-For.</b> Behind a load balancer, the socket address is
      * the balancer's, not the client's, so every client would share one bucket.

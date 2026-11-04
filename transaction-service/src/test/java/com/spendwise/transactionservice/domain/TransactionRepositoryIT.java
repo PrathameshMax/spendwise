@@ -64,6 +64,18 @@ class TransactionRepositoryIT {
     }
 
     @Test
+    void ownerScopedLookupNeverReturnsAnotherUsersTransaction() {
+        UUID alice = UUID.randomUUID();
+        UUID bob = UUID.randomUUID();
+        Category category = categoryRepository.save(new Category("Rent", false));
+        Transaction bobsRent = transactionRepository.save(new Transaction(bob, category, new BigDecimal("25000.00"),
+                TransactionType.EXPENSE, "Rent", LocalDate.of(2026, 10, 1), "INR", new BigDecimal("25000.00")));
+
+        assertThat(transactionRepository.findByIdAndUserId(bobsRent.getId(), bob)).isPresent();
+        assertThat(transactionRepository.findByIdAndUserId(bobsRent.getId(), alice)).isEmpty();
+    }
+
+    @Test
     void unfilteredSpecificationReturnsEverything() {
         Category category = categoryRepository.save(new Category("Groceries", false));
         transactionRepository.save(new Transaction(UUID.randomUUID(), category, BigDecimal.TEN,

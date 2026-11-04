@@ -79,6 +79,10 @@ public abstract class AbstractReactiveGlobalExceptionHandler extends ResponseEnt
 
     @ExceptionHandler(Exception.class)
     public Mono<ResponseEntity<ProblemDetail>> handleUnexpectedException(Exception ex) {
+        if (SecurityExceptions.isSecurityException(ex)) {
+            // Let ExceptionTranslationWebFilter turn @PreAuthorize denials into 401/403.
+            return Mono.error(ex);
+        }
         log.error("Unhandled exception reached the global handler", ex);
         return Mono.deferContextual(ctx -> {
             ProblemDetail problem = ProblemDetail.forStatusAndDetail(

@@ -31,9 +31,6 @@ scrape_configs:
       - targets: ["host.docker.internal:8080"]
         labels:
           service: api-gateway
-      - targets: ["host.docker.internal:8081"]
-        labels:
-          service: auth-service
       - targets: ["host.docker.internal:8082"]
         labels:
           service: user-service

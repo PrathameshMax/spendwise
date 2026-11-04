@@ -6,6 +6,7 @@ import feign.FeignException;
 import io.github.resilience4j.timelimiter.annotation.TimeLimiter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.security.concurrent.DelegatingSecurityContextExecutor;
 import org.springframework.stereotype.Component;
 
 import java.util.UUID;
@@ -57,9 +58,17 @@ public class AsyncUserServiceLookup {
         this.userServiceLookupExecutor = userServiceLookupExecutor;
     }
 
+    /**
+     * The Feign call runs on {@code userServiceLookupExecutor}, not the request thread,
+     * so the caller's SecurityContext is copied onto that thread
+     * ({@link DelegatingSecurityContextExecutor} captures it at submit time). That is
+     * what lets {@code BearerTokenRelayRequestInterceptor} forward the end user's own
+     * access token to user-service instead of falling back to a service token.
+     */
     @TimeLimiter(name = "userServiceLookup", fallbackMethod = "getByIdAsyncFallback")
     public CompletableFuture<UserExistenceResponse> getByIdAsync(UUID id) {
-        return CompletableFuture.supplyAsync(() -> userServiceClient.getById(id), userServiceLookupExecutor);
+        return CompletableFuture.supplyAsync(() -> userServiceClient.getById(id),
+                new DelegatingSecurityContextExecutor(userServiceLookupExecutor));
     }
 
     /**

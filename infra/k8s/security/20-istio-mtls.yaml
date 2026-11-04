@@ -1,0 +1,11 @@
+# Hop ⑤ — mutual TLS between all pods in the namespace. STRICT rejects any
+# plaintext connection, so traffic is encrypted and each side proves its
+# identity with a SPIFFE certificate issued by Istio for its service account.
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: spendwise
+spec:
+  mtls:
+    mode: STRICT

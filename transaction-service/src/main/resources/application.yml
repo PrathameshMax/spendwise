@@ -4,8 +4,32 @@ spring:
   profiles:
     active: dev
   config:
-    import: "configserver:${CONFIG_SERVER_URL:http://localhost:8888}"
+    import: "configserver:${CONFIG_SERVER_URL:http://localhost:8888},optional:vault://"
   cloud:
+    # Secrets — Vault overrides config-server values (later imports win). Off by
+    # default so the service still runs from the IDE without Vault; compose sets
+    # VAULT_ENABLED=true and hands over a dev token, Kubernetes uses KUBERNETES auth
+    # (the pod's service account) instead of a token.
+    vault:
+      enabled: ${VAULT_ENABLED:false}
+      uri: ${VAULT_URI:http://localhost:8200}
+      fail-fast: false
+      authentication: ${VAULT_AUTH_METHOD:TOKEN}
+      token: ${VAULT_TOKEN:}
+      kubernetes:
+        role: transaction-service
+        service-account-token-file: /var/run/secrets/kubernetes.io/serviceaccount/token
+      kv:
+        enabled: true
+        backend: secret
+        default-context: ""
+        application-name: transaction-service
+      # Short-lived Postgres credentials (database/creds/transaction-service) replace the
+      # static spring.datasource.username/password from config-server.
+      database:
+        enabled: ${VAULT_ENABLED:false}
+        backend: database
+        role: transaction-service
     config:
       fail-fast: true
       retry:

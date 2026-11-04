@@ -4,6 +4,7 @@ import com.spendwise.transactionservice.service.CategoryService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -22,12 +23,18 @@ public class CategoryController {
         this.categoryService = categoryService;
     }
 
+    /**
+     * Categories are a shared catalogue, so creating one is an admin operation:
+     * a CUSTOMER token gets 403 here.
+     */
     @PostMapping
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<CategoryResponse> create(@Valid @RequestBody CreateCategoryRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(categoryService.create(request));
     }
 
     @GetMapping
+    @PreAuthorize("hasAuthority('SCOPE_transactions:read')")
     public ResponseEntity<List<CategoryResponse>> list() {
         return ResponseEntity.ok(categoryService.list());
     }
