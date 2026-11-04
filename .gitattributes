@@ -7,3 +7,9 @@ infra/splunk/** text eol=lf
 infra/fluent-bit/** text eol=lf
 infra/appdynamics/** text eol=lf
 infra/partners/** text eol=lf
+
+# Shell scripts run inside Linux containers (vault-init, kafka-acls) or by bash:
+# with CRLF, `set -eu\r` fails ("illegal option") and the job exits 2.
+*.sh text eol=lf
+infra/vault/** text eol=lf
+infra/kafka/secure/** text eol=lf
