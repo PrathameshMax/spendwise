@@ -76,7 +76,13 @@
         "composites": {
           "realm": [
             "CUSTOMER"
-          ]
+          ],
+          "client": {
+            "account": [
+              "view-profile",
+              "manage-account"
+            ]
+          }
         }
       }
     ]
