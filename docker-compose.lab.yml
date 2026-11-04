@@ -99,12 +99,6 @@ services:
       # so the level is set on the package rather than the class.
       LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_CLOUD_CONFIG_SERVER_ENVIRONMENT: WARN
 
-  auth-service:
-    logging: *lab-logging
-    environment:
-      <<: *json-logs
-      SPRING_PROFILES_ACTIVE: prod,lab
-
   user-service:
     logging: *lab-logging
     environment:

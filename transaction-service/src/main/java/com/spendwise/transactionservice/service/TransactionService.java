@@ -1,6 +1,7 @@
 package com.spendwise.transactionservice.service;
 
 import com.spendwise.common.exception.ResourceNotFoundException;
+import com.spendwise.common.security.SecurityAuditLogger;
 import com.spendwise.transactionservice.api.CreateTransactionRequest;
 import com.spendwise.transactionservice.api.TransactionFilter;
 import com.spendwise.transactionservice.api.TransactionResponse;
@@ -50,8 +51,8 @@ public class TransactionService {
     }
 
     @Transactional
-    public TransactionResponse create(CreateTransactionRequest request) {
-        UserExistenceResponse user = verifyUserExists(request.userId());
+    public TransactionResponse create(UUID ownerId, CreateTransactionRequest request) {
+        UserExistenceResponse user = verifyUserExists(ownerId);
 
         Category category = categoryRepository.findById(request.categoryId())
                 .orElseThrow(() -> new ResourceNotFoundException("Category", request.categoryId()));
@@ -60,7 +61,7 @@ public class TransactionService {
                 request.amount(), request.currency(), user.preferredCurrency());
 
         Transaction saved = transactionRepository.save(new Transaction(
-                request.userId(),
+                ownerId,
                 category,
                 request.amount(),
                 request.type(),
@@ -170,6 +171,20 @@ public class TransactionService {
             return runtimeException;
         }
         return ex;
+    }
+
+    /**
+     * IDOR-safe read: the owner is part of the query. A transaction that exists but
+     * belongs to someone else is reported exactly like one that does not exist.
+     */
+    @Transactional(readOnly = true)
+    public TransactionResponse getOwned(UUID ownerId, UUID transactionId) {
+        return transactionRepository.findByIdAndUserId(transactionId, ownerId)
+                .map(transactionMapper::toResponse)
+                .orElseThrow(() -> {
+                    SecurityAuditLogger.ownershipViolation("Transaction", transactionId, ownerId.toString());
+                    return new ResourceNotFoundException("Transaction", transactionId);
+                });
     }
 
     @Transactional(readOnly = true)

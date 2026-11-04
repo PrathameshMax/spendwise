@@ -1,0 +1,142 @@
+# Hop ⑤ — NetworkPolicies decide who may call whom. Default deny in both
+# directions, then only the edges SpendWise actually uses. Nobody can reach a
+# microservice except through the gateway (or the one service that calls it).
+# Platform namespaces assumed: ingress-nginx, istio-system, monitoring,
+# identity (Keycloak), vault, data (Postgres, Kafka, Redis).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: default-deny-all, namespace: spendwise}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+# Every pod: DNS, the Istio control plane (sidecar config + certificates),
+# Keycloak JWKS, Vault, and the data tier.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: allow-platform-egress, namespace: spendwise}
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}
+          podSelector: {matchLabels: {k8s-app: kube-dns}}
+      ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+    - to:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: istio-system}}
+      ports: [{protocol: TCP, port: 15012}, {protocol: TCP, port: 15017}]
+    - to:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: identity}}
+      ports: [{protocol: TCP, port: 8080}]
+    - to:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: vault}}
+      ports: [{protocol: TCP, port: 8200}]
+    - to:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: data}}
+      ports: [{protocol: TCP, port: 5432}, {protocol: TCP, port: 19092}, {protocol: TCP, port: 6379}]
+---
+# Prometheus may scrape every pod's actuator port.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: allow-prometheus-scrape, namespace: spendwise}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: monitoring}}
+      ports:
+        - {protocol: TCP, port: 8080}
+        - {protocol: TCP, port: 8082}
+        - {protocol: TCP, port: 8083}
+        - {protocol: TCP, port: 8084}
+        - {protocol: TCP, port: 8085}
+        - {protocol: TCP, port: 8086}
+---
+# The gateway: reachable only from the ingress controller; may call the four
+# routed services.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: api-gateway, namespace: spendwise}
+spec:
+  podSelector: {matchLabels: {app: api-gateway}}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: ingress-nginx}}
+      ports: [{protocol: TCP, port: 8080}]
+  egress:
+    - to:
+        - podSelector: {matchLabels: {app: user-service}}
+      ports: [{protocol: TCP, port: 8082}]
+    - to:
+        - podSelector: {matchLabels: {app: transaction-service}}
+      ports: [{protocol: TCP, port: 8083}]
+    - to:
+        - podSelector: {matchLabels: {app: budget-service}}
+      ports: [{protocol: TCP, port: 8084}]
+    - to:
+        - podSelector: {matchLabels: {app: analytics-service}}
+      ports: [{protocol: TCP, port: 8086}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: user-service, namespace: spendwise}
+spec:
+  podSelector: {matchLabels: {app: user-service}}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {matchLabels: {app: api-gateway}}
+        - podSelector: {matchLabels: {app: transaction-service}}
+        - podSelector: {matchLabels: {app: budget-service}}
+      ports: [{protocol: TCP, port: 8082}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: transaction-service, namespace: spendwise}
+spec:
+  podSelector: {matchLabels: {app: transaction-service}}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector: {matchLabels: {app: api-gateway}}
+      ports: [{protocol: TCP, port: 8083}]
+  egress:
+    - to:
+        - podSelector: {matchLabels: {app: user-service}}
+      ports: [{protocol: TCP, port: 8082}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: budget-service, namespace: spendwise}
+spec:
+  podSelector: {matchLabels: {app: budget-service}}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector: {matchLabels: {app: api-gateway}}
+      ports: [{protocol: TCP, port: 8084}]
+    - from:
+        - podSelector: {matchLabels: {app: analytics-service}}
+      ports: [{protocol: TCP, port: 9090}]
+  egress:
+    - to:
+        - podSelector: {matchLabels: {app: user-service}}
+      ports: [{protocol: TCP, port: 8082}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: analytics-service, namespace: spendwise}
+spec:
+  podSelector: {matchLabels: {app: analytics-service}}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector: {matchLabels: {app: api-gateway}}
+      ports: [{protocol: TCP, port: 8086}]
+  egress:
+    - to:
+        - podSelector: {matchLabels: {app: budget-service}}
+      ports: [{protocol: TCP, port: 9090}]

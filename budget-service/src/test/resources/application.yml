@@ -2,5 +2,14 @@ spring:
   cloud:
     config:
       enabled: false
+    vault:
+      enabled: false
   config:
     import: ""
+
+spendwise:
+  security:
+    resource-server:
+      issuer: http://localhost:8180/realms/spendwise
+      jwk-set-uri: http://localhost:8180/realms/spendwise/protocol/openid-connect/certs
+      audience: spendwise-api

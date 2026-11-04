@@ -12,6 +12,26 @@ spring:
       timeout: 200ms
   flyway:
     enabled: true
+    # With Vault database credentials the login is a short-lived member of the
+    # schema-owner role; switching to that role keeps new objects owned by it.
+    init-sqls: SET ROLE spendwise
+  # Hop ⑤ — client credentials: this service's own token for calls made without a
+  # user in context (Kafka listeners, background jobs). The secret is read from
+  # Vault (secret/transaction-service); the empty default keeps the registration valid when
+  # running without Vault.
+  security:
+    oauth2:
+      client:
+        registration:
+          spendwise-service:
+            provider: keycloak
+            client-id: transaction-service
+            client-secret: ${TRANSACTION_SERVICE_CLIENT_SECRET:}
+            authorization-grant-type: client_credentials
+            scope: users:read
+        provider:
+          keycloak:
+            token-uri: ${KEYCLOAK_INTERNAL_URL:http://localhost:8180}/realms/spendwise/protocol/openid-connect/token
   # Producer settings (acks=all, idempotence, bounded timeouts, KafkaTemplate
   # observation, admin timeouts) moved to config-repo/application.yml at
   # Milestone 21, when budget-service became the second producer.

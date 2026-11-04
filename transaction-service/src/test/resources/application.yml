@@ -2,6 +2,8 @@ spring:
   cloud:
     config:
       enabled: false
+    vault:
+      enabled: false
   config:
     import: ""
   kafka:
@@ -18,7 +20,10 @@ spendwise:
     connect-timeout-ms: 2000
     read-timeout-ms: 1500
   security:
-    user-context-secret: test-only-user-context-secret
+    resource-server:
+      issuer: http://localhost:8180/realms/spendwise
+      jwk-set-uri: http://localhost:8180/realms/spendwise/protocol/openid-connect/certs
+      audience: spendwise-api
   kafka:
     topics:
       transaction-events: transaction-events

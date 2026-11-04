@@ -1,12 +1,15 @@
 package com.spendwise.analyticsservice.grpc;
 
 import com.spendwise.common.exception.DownstreamServiceUnavailableException;
+import com.spendwise.common.security.ReactiveCurrentUser;
 import com.spendwise.common.tracing.CorrelationIdConstants;
 import com.spendwise.grpc.budget.BudgetSummaryItem;
 import com.spendwise.grpc.budget.BudgetSummaryRequest;
 import com.spendwise.grpc.budget.BudgetSummaryResponse;
 import com.spendwise.grpc.budget.BudgetSummaryServiceGrpc;
+import io.grpc.Metadata;
 import io.grpc.Status;
+import io.grpc.stub.MetadataUtils;
 import io.grpc.stub.StreamObserver;
 import net.devh.boot.grpc.client.inject.GrpcClient;
 import org.slf4j.Logger;
@@ -74,6 +77,8 @@ public class BudgetSummaryGrpcClient {
     private static final Logger log = LoggerFactory.getLogger(BudgetSummaryGrpcClient.class);
 
     private static final String DOWNSTREAM_SERVICE_NAME = "budget-service";
+    private static final Metadata.Key<String> AUTHORIZATION =
+            Metadata.Key.of("authorization", Metadata.ASCII_STRING_MARSHALLER);
 
     @GrpcClient("budget-service")
     private BudgetSummaryServiceGrpc.BudgetSummaryServiceStub asyncStub;
@@ -90,9 +95,13 @@ public class BudgetSummaryGrpcClient {
                 .setPeriodMonth(periodMonth.toString())
                 .build();
 
-        return Mono.deferContextual(ctx -> {
+        return ReactiveCurrentUser.bearerToken()
+                .switchIfEmpty(Mono.error(() -> new IllegalStateException(
+                        "No authenticated bearer token to relay to budget-service")))
+                .flatMap(token -> Mono.deferContextual(ctx -> {
             String correlationId = ctx.getOrDefault(CorrelationIdConstants.MDC_KEY, null);
             return Mono.<BudgetSummaryResponse>create(sink -> asyncStub
+                    .withInterceptors(MetadataUtils.newAttachHeadersInterceptor(bearerMetadata(token)))
                     .withDeadlineAfter(deadline.toMillis(), TimeUnit.MILLISECONDS)
                     .getSummary(request, new StreamObserver<>() {
                         @Override
@@ -116,7 +125,7 @@ public class BudgetSummaryGrpcClient {
                             // onNext already resolved the sink for this unary call; nothing further to do.
                         }
                     }));
-        }).onErrorMap(BudgetSummaryGrpcClient::isDownstreamUnavailable,
+        })).onErrorMap(BudgetSummaryGrpcClient::isDownstreamUnavailable,
                 ex -> new DownstreamServiceUnavailableException(DOWNSTREAM_SERVICE_NAME, ex))
                 .map(BudgetSummaryResponse::getItemsList);
     }
@@ -127,6 +136,16 @@ public class BudgetSummaryGrpcClient {
      * whichever of the two the stub surfaced, and returns {@code UNKNOWN}
      * (not mapped) for anything that isn't a gRPC status at all.
      */
+    /**
+     * Relays the end user's access token as gRPC {@code authorization} metadata, so
+     * budget-service authenticates the real user and enforces ownership on its side.
+     */
+    private static Metadata bearerMetadata(String token) {
+        Metadata metadata = new Metadata();
+        metadata.put(AUTHORIZATION, "Bearer " + token);
+        return metadata;
+    }
+
     private static boolean isDownstreamUnavailable(Throwable ex) {
         Status.Code code = Status.fromThrowable(ex).getCode();
         return code == Status.Code.UNAVAILABLE || code == Status.Code.DEADLINE_EXCEEDED;

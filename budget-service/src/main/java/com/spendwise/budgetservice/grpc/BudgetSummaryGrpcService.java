@@ -2,6 +2,8 @@ package com.spendwise.budgetservice.grpc;
 
 import com.spendwise.budgetservice.api.BudgetResponse;
 import com.spendwise.budgetservice.service.BudgetService;
+import com.spendwise.common.security.CurrentUser;
+import com.spendwise.common.security.SecurityAuditLogger;
 import com.spendwise.grpc.budget.BudgetSummaryItem;
 import com.spendwise.grpc.budget.BudgetSummaryRequest;
 import com.spendwise.grpc.budget.BudgetSummaryResponse;
@@ -66,6 +68,17 @@ public class BudgetSummaryGrpcService extends BudgetSummaryServiceGrpc.BudgetSum
             responseObserver.onError(Status.INVALID_ARGUMENT
                     .withDescription("user_id must be a well-formed UUID: " + request.getUserId())
                     .withCause(ex)
+                    .asRuntimeException());
+            return;
+        }
+
+        CurrentUser caller = CurrentUser.from(JwtGrpcServerInterceptor.currentAuthentication());
+        if (!caller.isPrivileged() && !caller.userId().equals(userId)) {
+            // Ownership over gRPC too: analytics-service relays the end user's token,
+            // so a customer can only ever read their own summary.
+            SecurityAuditLogger.ownershipViolation("BudgetSummary", userId, caller.userId().toString());
+            responseObserver.onError(Status.PERMISSION_DENIED
+                    .withDescription("Callers may only read their own budget summary")
                     .asRuntimeException());
             return;
         }

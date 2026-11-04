@@ -10,3 +10,11 @@ spring:
         # into multi-row INSERT statements: roughly 3-5x faster bulk loading.
         # Affects JDBC batches only; JPA writes from the real APIs are unbatched.
         reWriteBatchedInserts: true
+
+# Lab only: the /lab/seed endpoints are called by local lab scripts without a
+# token. Never enabled outside the "lab" profile.
+spendwise:
+  security:
+    resource-server:
+      public-paths:
+        - /lab/**

@@ -307,6 +307,97 @@ services:
   # best-effort — a service starts fine without it and simply retries
   # registration in the background (Q41/Q42), so gating startup on it here
   # would misrepresent that distinction rather than fix a real problem.
+  # Application security — hop ① Identity. Keycloak is the Identity Provider:
+  # it owns login, registration, passwords (argon2), MFA (TOTP policy), brute-force
+  # lockout and token issuance (RS256 JWTs, 5-minute access tokens, rotating
+  # refresh tokens). The realm, clients, roles and scopes are imported from
+  # infra/keycloak/spendwise-realm.json on first start; client secrets in that
+  # file are ${ENV} placeholders resolved from the variables below.
+  # KC_HOSTNAME pins the issuer (iss) to the browser-facing URL; with
+  # KC_HOSTNAME_BACKCHANNEL_DYNAMIC, containers can still reach it as
+  # http://keycloak:8080 for token exchange and JWKS.
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0.7
+    container_name: spendwise-keycloak
+    command: ["start-dev", "--import-realm"]
+    ports:
+      - "8180:8080"
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KC_HOSTNAME: http://localhost:8180
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_HTTP_ENABLED: "true"
+      KC_HEALTH_ENABLED: "true"
+      KC_LOG_LEVEL: info,org.keycloak.events:debug
+      SPENDWISE_BFF_CLIENT_SECRET: ${SPENDWISE_BFF_CLIENT_SECRET:-dev-bff-secret-change-me}
+      TRANSACTION_SERVICE_CLIENT_SECRET: ${TRANSACTION_SERVICE_CLIENT_SECRET:-dev-transaction-service-secret}
+      BUDGET_SERVICE_CLIENT_SECRET: ${BUDGET_SERVICE_CLIENT_SECRET:-dev-budget-service-secret}
+    volumes:
+      - ./infra/keycloak:/opt/keycloak/data/import:ro
+    # The image has no curl/wget/grep; bash's /dev/tcp reads the status line of
+    # GET /health/ready on the management port (9000).
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && read -r status <&3 && case \"$$status\" in *' 200 '*) exit 0 ;; *) exit 1 ;; esac"]
+      interval: 10s
+      timeout: 5s
+      start_period: 60s
+      retries: 15
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 768M
+
+  # Secrets — HashiCorp Vault in dev mode (in-memory, auto-unsealed; never for
+  # shared environments). vault-init seeds it on every `up`: KV secrets per
+  # service, the database secrets engine issuing short-lived Postgres users, one
+  # least-privilege policy per service, and one dev token per service bound to
+  # that policy. In Kubernetes the tokens are replaced by Kubernetes auth (each
+  # pod logs in with its service account) — see infra/k8s/security.
+  vault:
+    image: hashicorp/vault:1.18
+    container_name: spendwise-vault
+    ports:
+      - "8200:8200"
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_DEV_ROOT_TOKEN:-dev-root-token}
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+    cap_add:
+      - IPC_LOCK
+    healthcheck:
+      test: ["CMD", "vault", "status", "-address=http://127.0.0.1:8200"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  vault-init:
+    image: hashicorp/vault:1.18
+    container_name: spendwise-vault-init
+    entrypoint: ["/bin/sh", "/scripts/init.sh"]
+    environment:
+      VAULT_ADDR: http://vault:8200
+      VAULT_TOKEN: ${VAULT_DEV_ROOT_TOKEN:-dev-root-token}
+      POSTGRES_ADMIN_USER: spendwise
+      POSTGRES_ADMIN_PASSWORD: spendwise
+      USER_SERVICE_FIELD_ENCRYPTION_KEY: ${USER_SERVICE_FIELD_ENCRYPTION_KEY:-c3BlbmR3aXNlLWRldi1vbmx5LWZpZWxkLWtleS0wMSE=}
+      TRANSACTION_SERVICE_CLIENT_SECRET: ${TRANSACTION_SERVICE_CLIENT_SECRET:-dev-transaction-service-secret}
+      BUDGET_SERVICE_CLIENT_SECRET: ${BUDGET_SERVICE_CLIENT_SECRET:-dev-budget-service-secret}
+      USER_SERVICE_VAULT_TOKEN: dev-token-user-service
+      TRANSACTION_SERVICE_VAULT_TOKEN: dev-token-transaction-service
+      BUDGET_SERVICE_VAULT_TOKEN: dev-token-budget-service
+      ANALYTICS_SERVICE_VAULT_TOKEN: dev-token-analytics-service
+    volumes:
+      - ./infra/vault:/scripts:ro
+    depends_on:
+      vault:
+        condition: service_healthy
+      postgres-db-init:
+        condition: service_completed_successfully
+    restart: "no"
+
   discovery-server:
     build:
       context: .
@@ -343,33 +434,6 @@ services:
           cpus: "1.0"
           memory: 384M
 
-  auth-service:
-    build:
-      context: .
-      dockerfile: auth-service/Dockerfile
-    container_name: spendwise-auth-service
-    ports:
-      - "8081:8081"
-    environment:
-      DB_HOST: postgres
-      CONFIG_SERVER_URL: http://config-server:8888
-      EUREKA_HOST: discovery-server
-      MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
-    depends_on:
-      config-server:
-        condition: service_healthy
-      postgres-db-init:
-        condition: service_completed_successfully
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8081/actuator/health"]
-      <<: *java-healthcheck
-    deploy:
-      resources:
-        limits:
-          cpus: "1.0"
-          memory: 512M
-
   user-service:
     build:
       context: .
@@ -378,11 +442,19 @@ services:
     ports:
       - "8082:8082"
     environment:
+      # Application security — the service validates Keycloak JWTs itself (JWKS
+      # fetched in-network) and reads its secrets / DB credentials from Vault.
+      KEYCLOAK_INTERNAL_URL: http://keycloak:8080
+      VAULT_ENABLED: "true"
+      VAULT_URI: http://vault:8200
+      VAULT_TOKEN: dev-token-user-service
       DB_HOST: postgres
       CONFIG_SERVER_URL: http://config-server:8888
       EUREKA_HOST: discovery-server
       MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
     depends_on:
+      vault-init:
+        condition: service_completed_successfully
       config-server:
         condition: service_healthy
       postgres-db-init:
@@ -405,6 +477,12 @@ services:
     ports:
       - "8083:8083"
     environment:
+      # Application security — the service validates Keycloak JWTs itself (JWKS
+      # fetched in-network) and reads its secrets / DB credentials from Vault.
+      KEYCLOAK_INTERNAL_URL: http://keycloak:8080
+      VAULT_ENABLED: "true"
+      VAULT_URI: http://vault:8200
+      VAULT_TOKEN: dev-token-transaction-service
       DB_HOST: postgres
       CONFIG_SERVER_URL: http://config-server:8888
       EUREKA_HOST: discovery-server
@@ -426,6 +504,8 @@ services:
       # cache is optional, so transaction-service must start and serve without it.
       REDIS_HOST: redis
     depends_on:
+      vault-init:
+        condition: service_completed_successfully
       config-server:
         condition: service_healthy
       postgres-db-init:
@@ -469,6 +549,12 @@ services:
       # host port.
       - "9095:9090"
     environment:
+      # Application security — the service validates Keycloak JWTs itself (JWKS
+      # fetched in-network) and reads its secrets / DB credentials from Vault.
+      KEYCLOAK_INTERNAL_URL: http://keycloak:8080
+      VAULT_ENABLED: "true"
+      VAULT_URI: http://vault:8200
+      VAULT_TOKEN: dev-token-budget-service
       DB_HOST: postgres
       CONFIG_SERVER_URL: http://config-server:8888
       EUREKA_HOST: discovery-server
@@ -486,6 +572,8 @@ services:
       # schema cannot be fetched is retried every 5 s, not dead-lettered
       # (spendwise-common's DeserializationFailureBackOff).
     depends_on:
+      vault-init:
+        condition: service_completed_successfully
       config-server:
         condition: service_healthy
       postgres-db-init:
@@ -580,6 +668,12 @@ services:
     ports:
       - "8086:8086"
     environment:
+      # Application security — the service validates Keycloak JWTs itself (JWKS
+      # fetched in-network) and reads its secrets / DB credentials from Vault.
+      KEYCLOAK_INTERNAL_URL: http://keycloak:8080
+      VAULT_ENABLED: "true"
+      VAULT_URI: http://vault:8200
+      VAULT_TOKEN: dev-token-analytics-service
       # Milestone 15 — analytics-service gains real Postgres persistence
       # (dashboard_query_log via R2DBC) for the first time; same ${VAR:localhost}
       # override pattern DB_HOST has used for every other *_db-backed service
@@ -599,6 +693,8 @@ services:
       # Milestone 22 — Avro serializers/deserializers resolve schemas here.
       SCHEMA_REGISTRY_URL: http://schema-registry:8081
     depends_on:
+      vault-init:
+        condition: service_completed_successfully
       # Milestone 22 — service_healthy: a consumer that meets a schema id it
       # has not cached yet must fetch it. An unreachable registry would only
       # stall the partition (retried every 5 s), but there is no reason to
@@ -635,6 +731,12 @@ services:
     ports:
       - "8080:8080"
     environment:
+      # Backend-for-frontend: OIDC client of Keycloak. Browser redirects use
+      # http://localhost:8180; token exchange and JWKS use the in-network URL.
+      KEYCLOAK_INTERNAL_URL: http://keycloak:8080
+      SPENDWISE_BFF_CLIENT_SECRET: ${SPENDWISE_BFF_CLIENT_SECRET:-dev-bff-secret-change-me}
+      # Local http://localhost: browsers accept Secure cookies on localhost.
+      SESSION_COOKIE_SECURE: "true"
       CONFIG_SERVER_URL: http://config-server:8888
       EUREKA_HOST: discovery-server
       MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
@@ -642,7 +744,6 @@ services:
       # config-repo/api-gateway.yml with each downstream service's own
       # compose service name, exactly the same `${VAR:localhost}` pattern
       # `DB_HOST` has used since Milestone 4.
-      AUTH_SERVICE_HOST: auth-service
       USER_SERVICE_HOST: user-service
       TRANSACTION_SERVICE_HOST: transaction-service
       BUDGET_SERVICE_HOST: budget-service
@@ -656,7 +757,7 @@ services:
     depends_on:
       config-server:
         condition: service_healthy
-      auth-service:
+      keycloak:
         condition: service_healthy
       user-service:
         condition: service_healthy

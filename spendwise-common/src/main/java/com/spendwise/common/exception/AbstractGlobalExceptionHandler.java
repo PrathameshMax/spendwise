@@ -69,7 +69,13 @@ public abstract class AbstractGlobalExceptionHandler extends ResponseEntityExcep
     }
 
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<ProblemDetail> handleUnexpectedException(Exception ex) {
+    public ResponseEntity<ProblemDetail> handleUnexpectedException(Exception ex) throws Exception {
+        if (SecurityExceptions.isSecurityException(ex)) {
+            // @PreAuthorize denials and authentication failures thrown from a controller
+            // must reach Spring Security's ExceptionTranslationFilter (401/403 problem
+            // body + WWW-Authenticate), not be swallowed here as a 500.
+            throw ex;
+        }
         log.error("Unhandled exception reached the global handler", ex);
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
                 HttpStatus.INTERNAL_SERVER_ERROR, "An unexpected error occurred");

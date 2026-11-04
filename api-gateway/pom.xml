@@ -13,10 +13,10 @@
     <artifactId>api-gateway</artifactId>
     <packaging>jar</packaging>
     <name>SpendWise :: API Gateway</name>
-    <description>Edge entry point (Milestone 6) — OAuth2 resource server that validates every
-        inbound JWT, rotates refresh tokens via secure cookies, and forwards a sanitized,
-        signed user-context header downstream so business services trust it without
-        re-validating the JWT themselves</description>
+    <description>Edge entry point and backend-for-frontend: OIDC login against Keycloak
+        (Authorization Code + PKCE) with tokens kept server-side behind an HttpOnly session
+        cookie, bearer-token validation for API clients, CORS, security headers, request
+        size limits, per-user/IP rate limiting and token relay to the microservices</description>
 
     <dependencies>
         <dependency>
@@ -35,6 +35,18 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
+        </dependency>
+        <!-- Backend-for-frontend: the gateway is the OAuth2/OIDC client (Authorization
+             Code + PKCE against Keycloak) and keeps tokens server-side; the browser
+             only holds an HttpOnly session cookie. Sessions live in Redis so any
+             gateway replica can serve any request. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-oauth2-client</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.session</groupId>
+            <artifactId>spring-session-data-redis</artifactId>
         </dependency>
         <dependency>
             <groupId>org.springframework.cloud</groupId>

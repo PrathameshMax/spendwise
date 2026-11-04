@@ -8,6 +8,8 @@ import com.spendwise.budgetservice.domain.BudgetRepository;
 import com.spendwise.budgetservice.mapper.BudgetMapper;
 import com.spendwise.common.exception.DuplicateResourceException;
 import com.spendwise.common.exception.ResourceNotFoundException;
+import com.spendwise.common.security.CurrentUser;
+import com.spendwise.common.security.SecurityAuditLogger;
 import feign.FeignException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -32,18 +34,18 @@ public class BudgetService {
     }
 
     @Transactional
-    public BudgetResponse create(CreateBudgetRequest request) {
-        verifyUserExists(request.userId());
+    public BudgetResponse create(UUID ownerId, CreateBudgetRequest request) {
+        verifyUserExists(ownerId);
 
         if (budgetRepository.existsByUserIdAndCategoryAndPeriodMonth(
-                request.userId(), request.category(), request.periodMonth())) {
+                ownerId, request.category(), request.periodMonth())) {
             throw new DuplicateResourceException(
                     "Budget", "userId+category+periodMonth",
-                    "%s/%s/%s".formatted(request.userId(), request.category(), request.periodMonth()));
+                    "%s/%s/%s".formatted(ownerId, request.category(), request.periodMonth()));
         }
 
         Budget saved = budgetRepository.save(new Budget(
-                request.userId(), request.category(), request.cappedAmount(), request.periodMonth(),
+                ownerId, request.category(), request.cappedAmount(), request.periodMonth(),
                 request.enforcementOrDefault()));
         return budgetMapper.toResponse(saved);
     }
@@ -64,6 +66,12 @@ public class BudgetService {
         } catch (FeignException.NotFound ex) {
             throw new ResourceNotFoundException("UserProfile", userId);
         }
+    }
+
+    @Transactional(readOnly = true)
+    public List<BudgetResponse> summaryForAdmin(CurrentUser admin, UUID userId, YearMonth periodMonth) {
+        SecurityAuditLogger.adminAction("READ_BUDGET_SUMMARY", admin.userId().toString(), userId);
+        return summary(userId, periodMonth);
     }
 
     @Transactional(readOnly = true)

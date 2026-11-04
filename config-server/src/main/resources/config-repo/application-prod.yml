@@ -1,0 +1,24 @@
+# Applied to every service running with the "prod" profile. Secure coding:
+# Actuator and Swagger are locked down — only health (for Kubernetes probes) and
+# Prometheus metrics are exposed, API docs are not generated or served, and
+# health details are not shown to anonymous callers.
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  endpoint:
+    health:
+      show-details: never
+
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+
+spendwise:
+  security:
+    resource-server:
+      public-paths: []
+    expose-api-docs: false

@@ -47,11 +47,10 @@ import java.util.Map;
  *
  * <p><b>Order.</b> Runs at {@link Ordered#HIGHEST_PRECEDENCE} + 20: after
  * {@link CorrelationIdGlobalFilter} (so the correlation id header is already
- * on the request, and the response decorator that echoes it is in place) and
- * {@link UserContextPropagationGlobalFilter}, but before any route's
- * {@code modifyResponseBody}/{@code modifyRequestBody} filters — a rejected
- * request is turned away before anything starts buffering or rewriting its
- * body.
+ * on the request, and the response decorator that echoes it is in place), but
+ * before the request-size, token-relay and header filters every route adds —
+ * a rejected request is turned away before a token is fetched or a body is
+ * read.
  */
 public class ProblemDetailRateLimitFilter implements GatewayFilter, Ordered {
 

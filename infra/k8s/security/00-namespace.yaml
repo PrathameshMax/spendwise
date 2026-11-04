@@ -1,0 +1,11 @@
+# Hop ⑤ — the SpendWise namespace. istio-injection=enabled puts an Envoy sidecar
+# next to every pod (mutual TLS + workload identity); the Pod Security labels
+# reject privileged pods.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: spendwise
+  labels:
+    istio-injection: enabled
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/warn: restricted

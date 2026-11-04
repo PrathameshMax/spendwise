@@ -31,9 +31,13 @@ import java.util.UUID;
  * currency support exists to not make. {@link TransactionService} compares it
  * against the user's {@code preferredCurrency} and only invokes
  * {@code ExchangeRateClient} when they differ.
+ *
+ * <p>There is deliberately no {@code userId} field: the owner of a new
+ * transaction is always the caller, taken from the access token's {@code sub}
+ * ({@code CurrentUser}). Accepting it from the body would let one customer
+ * create entries in another customer's ledger.
  */
 public record CreateTransactionRequest(
-        @NotNull UUID userId,
         @NotNull UUID categoryId,
         @NotNull @Positive BigDecimal amount,
         @NotNull TransactionType type,

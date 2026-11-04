@@ -1,0 +1,11 @@
+# Applied to every service running with the "dev" profile (alongside each
+# <service>-dev.yml). API documentation is browsable without a token in dev only;
+# application-prod.yml turns it off entirely.
+spendwise:
+  security:
+    resource-server:
+      public-paths:
+        - /v3/api-docs/**
+        - /swagger-ui/**
+        - /swagger-ui.html
+    expose-api-docs: true

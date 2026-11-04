@@ -1,0 +1,82 @@
+# Hop ⑤ — identity-based allow-lists on top of NetworkPolicies (which only see
+# IPs). An empty-spec policy denies everything; each ALLOW names the caller's
+# mTLS identity (service account). Application-level JWT checks still run in
+# every service — this is defense in depth, not a replacement.
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata: {name: deny-all, namespace: spendwise}
+spec: {}
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata: {name: api-gateway, namespace: spendwise}
+spec:
+  selector: {matchLabels: {app: api-gateway}}
+  action: ALLOW
+  rules:
+    - from:
+        - source: {namespaces: [ingress-nginx]}
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata: {name: user-service, namespace: spendwise}
+spec:
+  selector: {matchLabels: {app: user-service}}
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/spendwise/sa/api-gateway
+              - cluster.local/ns/spendwise/sa/transaction-service
+              - cluster.local/ns/spendwise/sa/budget-service
+      to:
+        - operation: {paths: ["/api/v1/users", "/api/v1/users/*"]}
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata: {name: transaction-service, namespace: spendwise}
+spec:
+  selector: {matchLabels: {app: transaction-service}}
+  action: ALLOW
+  rules:
+    - from:
+        - source: {principals: [cluster.local/ns/spendwise/sa/api-gateway]}
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata: {name: budget-service, namespace: spendwise}
+spec:
+  selector: {matchLabels: {app: budget-service}}
+  action: ALLOW
+  rules:
+    - from:
+        - source: {principals: [cluster.local/ns/spendwise/sa/api-gateway]}
+      to:
+        - operation: {ports: ["8084"]}
+    - from:
+        - source: {principals: [cluster.local/ns/spendwise/sa/analytics-service]}
+      to:
+        - operation: {ports: ["9090"]}
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata: {name: analytics-service, namespace: spendwise}
+spec:
+  selector: {matchLabels: {app: analytics-service}}
+  action: ALLOW
+  rules:
+    - from:
+        - source: {principals: [cluster.local/ns/spendwise/sa/api-gateway]}
+---
+# Prometheus (outside the mesh identity set) may read metrics only.
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata: {name: allow-metrics, namespace: spendwise}
+spec:
+  action: ALLOW
+  rules:
+    - from:
+        - source: {namespaces: [monitoring]}
+      to:
+        - operation: {methods: [GET], paths: ["/actuator/prometheus", "/actuator/health/*"]}

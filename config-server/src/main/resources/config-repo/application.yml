@@ -259,10 +259,26 @@ spendwise:
       max-retries: 3
       retry-interval: 1s
   security:
-    # Shared only between the API Gateway (signs) and business services (verify) —
-    # HMAC key for the X-User-Context header (Milestone 6). Override via env var
-    # in any real deployment; the default here is dev-only.
-    user-context-secret: ${SPENDWISE_USER_CONTEXT_SECRET:dev-only-shared-secret-change-for-real-deployments}
+    # Hop ③ — zero trust: every service validates the Keycloak access token
+    # itself (spendwise-common SpendwiseResourceServerAutoConfiguration).
+    # issuer must equal the token's iss (the browser-facing realm URL);
+    # jwk-set-uri is the in-network certs endpoint the public keys come from.
+    resource-server:
+      issuer: ${KEYCLOAK_PUBLIC_URL:http://localhost:8180}/realms/spendwise
+      jwk-set-uri: ${KEYCLOAK_INTERNAL_URL:http://localhost:8180}/realms/spendwise/protocol/openid-connect/certs
+      audience: spendwise-api
+      accepted-token-type: Bearer
+      clock-skew: 30s
+
+# Secure coding — error responses never leak internals: the RFC 7807 handlers
+# return fixed messages, and Boot's fallback /error never includes stack traces,
+# exception class names or binding details.
+server:
+  error:
+    include-stacktrace: never
+    include-exception: false
+    include-message: never
+    include-binding-errors: never
 
 eureka:
   client:
