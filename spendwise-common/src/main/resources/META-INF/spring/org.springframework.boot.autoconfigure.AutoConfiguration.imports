@@ -6,3 +6,4 @@ com.spendwise.common.security.SpendwiseResourceServerAutoConfiguration
 com.spendwise.common.security.SpendwiseReactiveResourceServerAutoConfiguration
 com.spendwise.common.security.SpendwiseServiceTokenAutoConfiguration
 com.spendwise.common.crypto.SpendwiseFieldEncryptionAutoConfiguration
+com.spendwise.common.vault.SpendwiseVaultDatabaseCredentialsAutoConfiguration

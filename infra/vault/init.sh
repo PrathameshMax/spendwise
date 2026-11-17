@@ -75,10 +75,17 @@ write_policy budget-service yes
 write_policy analytics-service no
 
 # --- Dev tokens (Kubernetes auth replaces these in the cluster) -----------------
+# Idempotent: this job runs on every `docker compose up`. Revoking an existing token
+# would also revoke every lease issued to it, i.e. Vault would DROP the running
+# service's Postgres login and its next new connection would fail with 28P01.
+# Keep a live token; issue one only when it is missing (first run, Vault restarted).
 create_token() {
   service="$1"
   token_id="$2"
-  vault token revoke "${token_id}" >/dev/null 2>&1 || true
+  if vault token lookup "${token_id}" >/dev/null 2>&1; then
+    echo "Kept dev token for ${service} (already valid; its leases stay live)"
+    return 0
+  fi
   vault token create -id="${token_id}" -policy="${service}" -period=768h -orphan -display-name="${service}" >/dev/null
   echo "Issued dev token for ${service}"
 }

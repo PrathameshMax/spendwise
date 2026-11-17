@@ -170,6 +170,21 @@
             <artifactId>logback-classic</artifactId>
             <optional>true</optional>
         </dependency>
+        <!-- Vault dynamic database credentials: SpendwiseVaultDatabaseCredentialsAutoConfiguration
+             swaps the Hikari pool's login when the Vault lease ends (max TTL or revoked).
+             Optional, same as spring-kafka above: user-, transaction- and budget-service bring
+             spring-cloud-vault-config-databases and HikariCP themselves; the auto-configuration
+             is @ConditionalOnClass on both. Versions come from the Spring Cloud / Boot BOMs. -->
+        <dependency>
+            <groupId>org.springframework.vault</groupId>
+            <artifactId>spring-vault-core</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>com.zaxxer</groupId>
+            <artifactId>HikariCP</artifactId>
+            <optional>true</optional>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
