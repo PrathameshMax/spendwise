@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import CsrfCheck from '../components/CsrfCheck.jsx';
 import HttpResult from '../components/HttpResult.jsx';
 import StatusBanner from '../components/StatusBanner.jsx';
 import { KEYCLOAK_ACCOUNT_URL } from '../config';
@@ -88,6 +89,8 @@ export default function SignedInPage({ user, check }) {
         {apiCall.kind === 'done' ? <HttpResult result={apiCall.result} /> : null}
         {apiCall.kind === 'failed' ? <p className="problem">{apiCall.message}</p> : null}
       </section>
+
+      <CsrfCheck />
 
       <section className="actions">
         <a className="button button-secondary" href={KEYCLOAK_ACCOUNT_URL}>

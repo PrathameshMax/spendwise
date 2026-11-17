@@ -302,6 +302,36 @@ pre {
   margin-top: 1rem;
 }
 
+.check + .check {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.check-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.verdict {
+  font-weight: 700;
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  padding: 0.1rem 0.55rem;
+  border-radius: 6px;
+  color: #fff;
+}
+
+.verdict-pass {
+  background: var(--success-border);
+}
+
+.verdict-fail {
+  background: var(--error-border);
+}
+
 .json,
 .cmd {
   background: #1e2623;

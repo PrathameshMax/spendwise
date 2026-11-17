@@ -18,10 +18,10 @@ async function request(path, init = {}) {
   let response;
   try {
     response = await fetch(`${GATEWAY_URL}${path}`, {
+      ...init,
       credentials: 'include',
       redirect: 'manual',
       headers: { Accept: 'application/json', ...(init.headers ?? {}) },
-      ...init,
     });
   } catch (cause) {
     throw new GatewayUnreachableError(GATEWAY_URL, cause);
@@ -54,6 +54,23 @@ async function request(path, init = {}) {
 export const fetchSessionUser = () => request('/bff/user');
 
 export const fetchMyProfile = () => request('/api/v1/users/me');
+
+// CSRF check: a harmless session-authenticated write (sets the currency it
+// already has). With includeCsrfToken=false the gateway must answer 403.
+export function updateMyCurrency({ includeCsrfToken }) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (includeCsrfToken) {
+    const csrfToken = readCsrfToken();
+    if (csrfToken) {
+      headers['X-XSRF-TOKEN'] = csrfToken;
+    }
+  }
+  return request('/api/v1/users/me', {
+    method: 'PATCH',
+    headers,
+    body: JSON.stringify({ preferredCurrency: 'INR' }),
+  });
+}
 
 export const loginUrl = () => `${GATEWAY_URL}${LOGIN_PATH}`;
 
