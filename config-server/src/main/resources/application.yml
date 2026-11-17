@@ -1,13 +1,19 @@
 spring:
   application:
     name: config-server
-  profiles:
-    active: native
   cloud:
     config:
       server:
-        native:
-          search-locations: classpath:/config-repo/
+        # Polyrepo — configuration lives in its own repository (spendwise-config),
+        # not inside this jar. Cloned once at startup, pulled again on each request
+        # when the remote has moved; the branch or tag is the request's label.
+        git:
+          uri: ${CONFIG_GIT_URI:https://github.com/PrathameshMax/spendwise-config.git}
+          default-label: ${CONFIG_GIT_LABEL:main}
+          clone-on-start: true
+          force-pull: true
+          timeout: 10
+          basedir: ${java.io.tmpdir}/spendwise-config
 
 server:
   port: 8888
@@ -32,9 +38,9 @@ logging:
     correlation: "[${spring.application.name:},%X{correlationId:-},%X{traceId:-},%X{spanId:-}] "
 
 # Milestone 10 — config-server itself is a config *producer*, not a consumer
-# of config-repo (a service can't fetch its own bootstrap config from itself),
+# of spendwise-config (a service can't fetch its own bootstrap config from itself),
 # so unlike every other module its Eureka registration is set directly here
-# rather than in config-repo/application.yml.
+# rather than in spendwise-config/application.yml.
 eureka:
   client:
     service-url:
