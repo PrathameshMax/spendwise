@@ -610,9 +610,10 @@ services:
   # every other JPA service. Four replicas therefore need ~2 GB; see the README's
   # Docker memory note before the chaos lab.
   notification-service:
-    build:
-      context: .
-      dockerfile: notification-service/Dockerfile
+    # Polyrepo — built and published by its own repository's CI
+    # (PrathameshMax/spendwise-notification-service), no longer from this tree.
+    image: ghcr.io/prathameshmax/spendwise-notification-service:main
+    pull_policy: always
     ports:
       - "18085-18088:8085"
     environment:

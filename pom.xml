@@ -20,7 +20,6 @@
         <module>user-service</module>
         <module>transaction-service</module>
         <module>budget-service</module>
-        <module>notification-service</module>
         <module>analytics-service</module>
         <module>api-gateway</module>
     </modules>
