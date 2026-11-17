@@ -1,0 +1,2109 @@
+{
+  "info": {
+    "_postman_id": "b638d04f-d248-5bf3-9d1d-9e720d63c99f",
+    "name": "SpendWise Security",
+    "description": "Security test round for the Docker Compose stack. Run the folders in order with the Collection Runner (or one by one). Every request asserts its expected status; failures name the control that did not hold. Log, database, Vault, gRPC and Kafka checks that Postman cannot do are in docs/security/security-test-plan.md. DEV ONLY: passwords and secrets below are the dev realm's.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "0 · Tokens (Keycloak)",
+      "description": "Gets one access token per actor with the dev-only `spendwise-dev-cli` client (password grant) and a client-credentials token for the `transaction-service` service account. Re-run this folder whenever a later request fails with `TOKEN_EXPIRED` (access tokens live 5 minutes).",
+      "item": [
+        {
+          "name": "Token · alice (CUSTOMER)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{keycloakUrl}}/realms/{{realm}}/protocol/openid-connect/token",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "password",
+                  "type": "text"
+                },
+                {
+                  "key": "client_id",
+                  "value": "{{devClientId}}",
+                  "type": "text"
+                },
+                {
+                  "key": "scope",
+                  "value": "openid",
+                  "type": "text"
+                },
+                {
+                  "key": "username",
+                  "value": "{{aliceUser}}",
+                  "type": "text"
+                },
+                {
+                  "key": "password",
+                  "value": "{{alicePassword}}",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200 - Keycloak issued tokens\", () => pm.response.to.have.status(200));",
+                  "const cryptoJs = require('crypto-js'); const decodeJwt = (t) => { const p = t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'); return JSON.parse(cryptoJs.enc.Base64.parse(p + '='.repeat((4 - p.length % 4) % 4)).toString(cryptoJs.enc.Utf8)); };",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('aliceToken', body.access_token);",
+                  "pm.collectionVariables.set('aliceRefreshToken', body.refresh_token);",
+                  "pm.collectionVariables.set('aliceIdToken', body.id_token);",
+                  "const claims = decodeJwt(body.access_token);",
+                  "pm.test('access token: typ Bearer, aud contains spendwise-api, sub is a UUID', () => {",
+                  "  pm.expect(claims.typ).to.eql('Bearer');",
+                  "  pm.expect([].concat(claims.aud)).to.include('spendwise-api');",
+                  "  pm.expect(claims.sub).to.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);",
+                  "});",
+                  "pm.test('access token lives 5 minutes', () => pm.expect(claims.exp - claims.iat).to.eql(300));",
+                  "pm.test('no account audience or resource_access in API tokens', () => {",
+                  "  pm.expect([].concat(claims.aud)).to.not.include('account');",
+                  "  pm.expect(claims).to.not.have.property('resource_access');",
+                  "});",
+                  "pm.test('alice has CUSTOMER, not ADMIN', () => { pm.expect(claims.realm_access.roles).to.include('CUSTOMER'); pm.expect(claims.realm_access.roles).to.not.include('ADMIN'); });",
+                  "pm.collectionVariables.set('expiryProbeToken', body.access_token);",
+                  "pm.collectionVariables.set('expiryProbeIssuedAt', String(Date.now()));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Token · bob (CUSTOMER)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{keycloakUrl}}/realms/{{realm}}/protocol/openid-connect/token",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "password",
+                  "type": "text"
+                },
+                {
+                  "key": "client_id",
+                  "value": "{{devClientId}}",
+                  "type": "text"
+                },
+                {
+                  "key": "scope",
+                  "value": "openid",
+                  "type": "text"
+                },
+                {
+                  "key": "username",
+                  "value": "{{bobUser}}",
+                  "type": "text"
+                },
+                {
+                  "key": "password",
+                  "value": "{{bobPassword}}",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200 - Keycloak issued tokens\", () => pm.response.to.have.status(200));",
+                  "const cryptoJs = require('crypto-js'); const decodeJwt = (t) => { const p = t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'); return JSON.parse(cryptoJs.enc.Base64.parse(p + '='.repeat((4 - p.length % 4) % 4)).toString(cryptoJs.enc.Utf8)); };",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('bobToken', body.access_token);",
+                  "pm.collectionVariables.set('bobRefreshToken', body.refresh_token);",
+                  "pm.collectionVariables.set('bobIdToken', body.id_token);",
+                  "const claims = decodeJwt(body.access_token);",
+                  "pm.test('access token: typ Bearer, aud contains spendwise-api, sub is a UUID', () => {",
+                  "  pm.expect(claims.typ).to.eql('Bearer');",
+                  "  pm.expect([].concat(claims.aud)).to.include('spendwise-api');",
+                  "  pm.expect(claims.sub).to.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);",
+                  "});",
+                  "pm.test('access token lives 5 minutes', () => pm.expect(claims.exp - claims.iat).to.eql(300));",
+                  "pm.test('no account audience or resource_access in API tokens', () => {",
+                  "  pm.expect([].concat(claims.aud)).to.not.include('account');",
+                  "  pm.expect(claims).to.not.have.property('resource_access');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Token · ops-admin (ADMIN)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{keycloakUrl}}/realms/{{realm}}/protocol/openid-connect/token",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "password",
+                  "type": "text"
+                },
+                {
+                  "key": "client_id",
+                  "value": "{{devClientId}}",
+                  "type": "text"
+                },
+                {
+                  "key": "scope",
+                  "value": "openid",
+                  "type": "text"
+                },
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}",
+                  "type": "text"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPassword}}",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200 - Keycloak issued tokens\", () => pm.response.to.have.status(200));",
+                  "const cryptoJs = require('crypto-js'); const decodeJwt = (t) => { const p = t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'); return JSON.parse(cryptoJs.enc.Base64.parse(p + '='.repeat((4 - p.length % 4) % 4)).toString(cryptoJs.enc.Utf8)); };",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('adminToken', body.access_token);",
+                  "pm.collectionVariables.set('adminRefreshToken', body.refresh_token);",
+                  "pm.collectionVariables.set('adminIdToken', body.id_token);",
+                  "const claims = decodeJwt(body.access_token);",
+                  "pm.test('access token: typ Bearer, aud contains spendwise-api, sub is a UUID', () => {",
+                  "  pm.expect(claims.typ).to.eql('Bearer');",
+                  "  pm.expect([].concat(claims.aud)).to.include('spendwise-api');",
+                  "  pm.expect(claims.sub).to.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);",
+                  "});",
+                  "pm.test('access token lives 5 minutes', () => pm.expect(claims.exp - claims.iat).to.eql(300));",
+                  "pm.test('no account audience or resource_access in API tokens', () => {",
+                  "  pm.expect([].concat(claims.aud)).to.not.include('account');",
+                  "  pm.expect(claims).to.not.have.property('resource_access');",
+                  "});",
+                  "pm.test('ops-admin has ADMIN', () => pm.expect(claims.realm_access.roles).to.include('ADMIN'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Token · transaction-service (SERVICE, client credentials)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{keycloakUrl}}/realms/{{realm}}/protocol/openid-connect/token",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "client_credentials",
+                  "type": "text"
+                },
+                {
+                  "key": "client_id",
+                  "value": "{{serviceClientId}}",
+                  "type": "text"
+                },
+                {
+                  "key": "client_secret",
+                  "value": "{{serviceClientSecret}}",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200 - service account authenticated with its client secret\", () => pm.response.to.have.status(200));",
+                  "const cryptoJs = require('crypto-js'); const decodeJwt = (t) => { const p = t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'); return JSON.parse(cryptoJs.enc.Base64.parse(p + '='.repeat((4 - p.length % 4) % 4)).toString(cryptoJs.enc.Utf8)); };",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('serviceToken', body.access_token);",
+                  "const claims = decodeJwt(body.access_token);",
+                  "pm.test('service token has SERVICE role and no email', () => { pm.expect(claims.realm_access.roles).to.include('SERVICE'); pm.expect(claims).to.not.have.property('email'); });",
+                  "pm.test('no refresh token for client credentials', () => pm.expect(body.refresh_token).to.be.undefined);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "1 · Seed data (gateway)",
+      "description": "Provisions both profiles, creates a category (admin) and one transaction owned by alice. The transaction POST is a bearer request without any CSRF header: bearer clients are exempt from CSRF by design.",
+      "item": [
+        {
+          "name": "alice · GET /users/me (provisions profile)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gatewayUrl}}/api/v1/users/me",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{aliceToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200 - alice reaches user-service through the gateway\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('aliceId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "bob · GET /users/me (provisions profile)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gatewayUrl}}/api/v1/users/me",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bobToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200 - bob reaches user-service through the gateway\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('bobId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "ops-admin · POST /categories",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{gatewayUrl}}/api/v1/categories",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"name\": \"Security-{{$timestamp}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 201 - ADMIN may manage the category catalogue\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('categoryId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "alice · POST /transactions (bearer, no CSRF header)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{gatewayUrl}}/api/v1/transactions",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{aliceToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"categoryId\": \"{{categoryId}}\",\n  \"amount\": 499.00,\n  \"type\": \"EXPENSE\",\n  \"description\": \"security test\",\n  \"transactionDate\": \"{{txDate}}\",\n  \"currency\": \"INR\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const d = new Date(Date.now() - 86400000);",
+                  "pm.collectionVariables.set('txDate', d.toISOString().slice(0, 10));",
+                  "pm.collectionVariables.set('periodMonth', new Date().toISOString().slice(0, 7));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 201 - bearer write accepted without X-XSRF-TOKEN (CSRF applies to session cookies only)\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('aliceTxId', pm.response.json().id);",
+                  "pm.test('transaction owned by alice', () => pm.expect(pm.response.json().userId).to.eql(pm.collectionVariables.get('aliceId')));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "2 · Authentication - who are you? (401)",
+      "description": "The gateway rejects anything that is not a valid, unexpired SpendWise access token, with a reason code in `errorCode` and a correlation id for the logs.",
+      "item": [
+        {
+          "name": "No token",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gatewayUrl}}/api/v1/users/me",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 401 - no credentials\", () => pm.response.to.have.status(401));",
+                  "pm.test('body is RFC 7807 problem JSON', () => { const b = pm.response.json(); pm.expect(b).to.have.property('status', pm.response.code); pm.expect(b).to.have.property('title'); });",
+                  "pm.test(\"errorCode is TOKEN_MISSING\", () => pm.expect(pm.response.json().errorCode).to.be.oneOf([\"TOKEN_MISSING\"]));",
+                  "pm.test('WWW-Authenticate: Bearer', () => pm.expect(pm.response.headers.get('WWW-Authenticate')).to.match(/^Bearer/));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Garbage token",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gatewayUrl}}/api/v1/users/me",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "not.a.jwt",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 401 - not a JWT\", () => pm.response.to.have.status(401));",
+                  "pm.test('body is RFC 7807 problem JSON', () => { const b = pm.response.json(); pm.expect(b).to.have.property('status', pm.response.code); pm.expect(b).to.have.property('title'); });",
+                  "pm.test(\"errorCode is TOKEN_UNVERIFIABLE or CLAIMS_INVALID\", () => pm.expect(pm.response.json().errorCode).to.be.oneOf([\"TOKEN_UNVERIFIABLE\", \"CLAIMS_INVALID\"]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tampered signature",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gatewayUrl}}/api/v1/users/me",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{tamperedToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const parts = pm.collectionVariables.get('aliceToken').split('.');",
+                  "const sig = parts[2]; const i = Math.floor(sig.length / 2);",
+                  "parts[2] = sig.slice(0, i) + (sig[i] === 'A' ? 'B' : 'A') + sig.slice(i + 1);",
+                  "pm.variables.set('tamperedToken', parts.join('.'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 401 - signature does not verify against Keycloak's JWKS\", () => pm.response.to.have.status(401));",
+                  "pm.test('body is RFC 7807 problem JSON', () => { const b = pm.response.json(); pm.expect(b).to.have.property('status', pm.response.code); pm.expect(b).to.have.property('title'); });",
+                  "pm.test(\"errorCode is TOKEN_UNVERIFIABLE\", () => pm.expect(pm.response.json().errorCode).to.be.oneOf([\"TOKEN_UNVERIFIABLE\"]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "ID token used as access token",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gatewayUrl}}/api/v1/users/me",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{aliceIdToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 401 - ID tokens are for the client, not for APIs\", () => pm.response.to.have.status(401));",
+                  "pm.test('body is RFC 7807 problem JSON', () => { const b = pm.response.json(); pm.expect(b).to.have.property('status', pm.response.code); pm.expect(b).to.have.property('title'); });",
+                  "pm.test(\"errorCode is AUDIENCE_MISMATCH or TOKEN_TYPE_REJECTED\", () => pm.expect(pm.response.json().errorCode).to.be.oneOf([\"AUDIENCE_MISMATCH\", \"TOKEN_TYPE_REJECTED\"]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Refresh token used as access token",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gatewayUrl}}/api/v1/users/me",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{aliceRefreshToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 401 - refresh tokens are never bearer credentials\", () => pm.response.to.have.status(401));",
+                  "pm.test('body is RFC 7807 problem JSON', () => { const b = pm.response.json(); pm.expect(b).to.have.property('status', pm.response.code); pm.expect(b).to.have.property('title'); });",
+                  "pm.test(\"errorCode is TOKEN_UNVERIFIABLE or TOKEN_TYPE_REJECTED or AUDIENCE_MISMATCH\", () => pm.expect(pm.response.json().errorCode).to.be.oneOf([\"TOKEN_UNVERIFIABLE\", \"TOKEN_TYPE_REJECTED\", \"AUDIENCE_MISMATCH\"]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Service-account token at the edge",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gatewayUrl}}/api/v1/users/me",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 401 - machine tokens never enter through the public gateway\", () => pm.response.to.have.status(401));",
+                  "pm.test('body is RFC 7807 problem JSON', () => { const b = pm.response.json(); pm.expect(b).to.have.property('status', pm.response.code); pm.expect(b).to.have.property('title'); });",
+                  "pm.test(\"errorCode is CLAIMS_INVALID\", () => pm.expect(pm.response.json().errorCode).to.be.oneOf([\"CLAIMS_INVALID\"]));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "3 · Authorization - roles and scopes (403)",
+      "description": "Every service re-validates the token and applies `@PreAuthorize` (role + scope). 403 means \"I know who you are, but you may not do this\".",
+      "item": [
+        {
+          "name": "alice · GET /users (ADMIN only)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gatewayUrl}}/api/v1/users",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{aliceToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403 - CUSTOMER cannot list all users\", () => pm.response.to.have.status(403));",
+                  "pm.test('body is RFC 7807 problem JSON', () => { const b = pm.response.json(); pm.expect(b).to.have.property('status', pm.response.code); pm.expect(b).to.have.property('title'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "ops-admin · GET /users (emails masked)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gatewayUrl}}/api/v1/users?size=50",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200 - ADMIN lists users\", () => pm.response.to.have.status(200));",
+                  "const users = pm.response.json().content;",
+                  "pm.test('list is not empty', () => pm.expect(users.length).to.be.above(0));",
+                  "pm.test('every email is masked (a***@domain)', () => users.forEach(u => pm.expect(u.email).to.match(/^[^@]\\*\\*\\*@/)));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "alice · POST /categories (ADMIN only)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{gatewayUrl}}/api/v1/categories",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{aliceToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"name\": \"Not-allowed-{{$timestamp}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403 - CUSTOMER cannot change the shared catalogue\", () => pm.response.to.have.status(403));",
+                  "pm.test('body is RFC 7807 problem JSON', () => { const b = pm.response.json(); pm.expect(b).to.have.property('status', pm.response.code); pm.expect(b).to.have.property('title'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "alice · GET another user's budget summary (ADMIN only)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gatewayUrl}}/api/v1/budgets/users/{{bobId}}/summary?periodMonth={{periodMonth}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{aliceToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403 - CUSTOMER cannot read someone else's budgets\", () => pm.response.to.have.status(403));",
+                  "pm.test('body is RFC 7807 problem JSON', () => { const b = pm.response.json(); pm.expect(b).to.have.property('status', pm.response.code); pm.expect(b).to.have.property('title'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "ops-admin · GET alice's budget summary",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gatewayUrl}}/api/v1/budgets/users/{{aliceId}}/summary?periodMonth={{periodMonth}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200 - ADMIN support view (written to the audit log as ADMIN_ACTION)\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "alice · GET /users/{aliceId} (self)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gatewayUrl}}/api/v1/users/{{aliceId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{aliceToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200 - a user may read their own profile by id\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "alice · GET /users/{bobId}",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gatewayUrl}}/api/v1/users/{{bobId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{aliceToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403 - not her id, not ADMIN/SERVICE\", () => pm.response.to.have.status(403));",
+                  "pm.test('body is RFC 7807 problem JSON', () => { const b = pm.response.json(); pm.expect(b).to.have.property('status', pm.response.code); pm.expect(b).to.have.property('title'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "service · GET user-service /users/{aliceId} (internal port)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{userServiceUrl}}/api/v1/users/{{aliceId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Called on user-service's own port: this is the path transaction-service's Feign client takes."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200 - SERVICE role may look up any profile service-to-service\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "service · GET user-service /users (ADMIN only)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{userServiceUrl}}/api/v1/users",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{serviceToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403 - SERVICE is not ADMIN\", () => pm.response.to.have.status(403));",
+                  "pm.test('body is RFC 7807 problem JSON', () => { const b = pm.response.json(); pm.expect(b).to.have.property('status', pm.response.code); pm.expect(b).to.have.property('title'); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "4 · Ownership - is this record yours? (IDOR)",
+      "description": "The owner always comes from the token's `sub`, never from the request. Someone else's record answers 404, the same as a record that does not exist, so ids cannot be probed.",
+      "item": [
+        {
+          "name": "alice · GET her transaction",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gatewayUrl}}/api/v1/transactions/{{aliceTxId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{aliceToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200 - owner reads her own record\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "bob · GET alice's transaction",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gatewayUrl}}/api/v1/transactions/{{aliceTxId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bobToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 404 - not yours = not found (logged as OWNERSHIP_CHECK_FAILED)\", () => pm.response.to.have.status(404));",
+                  "pm.test('body is RFC 7807 problem JSON', () => { const b = pm.response.json(); pm.expect(b).to.have.property('status', pm.response.code); pm.expect(b).to.have.property('title'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "bob · list with ?userId=alice (ignored)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gatewayUrl}}/api/v1/transactions?userId={{aliceId}}&size=100",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bobToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200 - list works\", () => pm.response.to.have.status(200));",
+                  "const rows = pm.response.json().content;",
+                  "pm.test('no row belongs to alice', () => rows.forEach(r => pm.expect(r.userId).to.not.eql(pm.collectionVariables.get('aliceId'))));",
+                  "pm.test('alice\\'s transaction is not in bob\\'s list', () => pm.expect(rows.map(r => r.id)).to.not.include(pm.collectionVariables.get('aliceTxId')));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "5 · Gateway edge controls",
+      "description": "CORS allow-list, identity-header stripping, request size cap and security headers, all enforced before a request reaches a service.",
+      "item": [
+        {
+          "name": "CORS · unknown origin rejected",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "https://evil.example"
+              }
+            ],
+            "url": "{{gatewayUrl}}/api/v1/users/me",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{aliceToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403 - origin not on the allow-list\", () => pm.response.to.have.status(403));",
+                  "pm.test('no Access-Control-Allow-Origin', () => pm.expect(pm.response.headers.has('Access-Control-Allow-Origin')).to.be.false);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CORS · web app origin allowed",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{webOrigin}}"
+              }
+            ],
+            "url": "{{gatewayUrl}}/api/v1/users/me",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{aliceToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200 - the SPA origin is allowed\", () => pm.response.to.have.status(200));",
+                  "pm.test('ACAO echoes the SPA origin with credentials', () => { pm.expect(pm.response.headers.get('Access-Control-Allow-Origin')).to.eql(pm.collectionVariables.get('webOrigin')); pm.expect(pm.response.headers.get('Access-Control-Allow-Credentials')).to.eql('true'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Spoofed identity headers ignored",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{bobId}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "ADMIN"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "bob@spendwise.dev"
+              }
+            ],
+            "url": "{{gatewayUrl}}/api/v1/users/me",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{aliceToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200 - request still served\", () => pm.response.to.have.status(200));",
+                  "pm.test('identity comes from the token, not the headers', () => pm.expect(pm.response.json().id).to.eql(pm.collectionVariables.get('aliceId')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Request body over 1 MB",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{gatewayUrl}}/api/v1/users/me",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{aliceToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{{oversizedBody}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.variables.set('oversizedBody', JSON.stringify({ preferredCurrency: 'INR', padding: 'x'.repeat(1100000) }));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 413 - max-request-size 1MB stops it at the edge\", () => pm.response.to.have.status(413));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Security headers on API responses",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gatewayUrl}}/api/v1/users/me",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{aliceToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200 - baseline\", () => pm.response.to.have.status(200));",
+                  "const h = (n) => pm.response.headers.get(n) || '';",
+                  "pm.test('X-Content-Type-Options: nosniff', () => pm.expect(h('X-Content-Type-Options')).to.include('nosniff'));",
+                  "pm.test('X-Frame-Options: DENY', () => pm.expect(h('X-Frame-Options')).to.include('DENY'));",
+                  "pm.test('Content-Security-Policy present', () => pm.expect(h('Content-Security-Policy')).to.include(\"default-src 'none'\"));",
+                  "pm.test('Cache-Control: no-store', () => pm.expect(h('Cache-Control')).to.include('no-store'));",
+                  "pm.test('Referrer-Policy: no-referrer', () => pm.expect(h('Referrer-Policy')).to.include('no-referrer'));",
+                  "pm.test('X-Correlation-ID returned', () => pm.expect(h('X-Correlation-ID')).to.not.be.empty);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "6 · Rate limiting (per user)",
+      "description": "Token bucket in Redis: 10 requests/s, burst 20, keyed by the token's `sub` (IP only for anonymous calls). Run these three in order.",
+      "item": [
+        {
+          "name": "alice · burst of 60 parallel requests",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gatewayUrl}}/api/v1/users/me",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{aliceToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const N = 60;",
+                  "const gw = pm.collectionVariables.get('gatewayUrl');",
+                  "const token = pm.collectionVariables.get('aliceToken');",
+                  "const statuses = []; const retryAfter = []; let problemOk = true; let done = 0;",
+                  "for (let i = 0; i < N; i++) {",
+                  "  pm.sendRequest({ url: gw + '/api/v1/users/me', method: 'GET', header: [{ key: 'Authorization', value: 'Bearer ' + token }] }, (err, res) => {",
+                  "    statuses.push(err ? 'ERR' : res.code);",
+                  "    if (!err && res.code === 429) {",
+                  "      retryAfter.push(res.headers.get('Retry-After'));",
+                  "      try { if (res.json().status !== 429) { problemOk = false; } } catch (e) { problemOk = false; }",
+                  "    }",
+                  "    if (++done === N) {",
+                  "      const ok = statuses.filter(s => s === 200).length;",
+                  "      const limited = statuses.filter(s => s === 429).length;",
+                  "      console.log('burst statuses', JSON.stringify(statuses));",
+                  "      pm.test(`burst of ${N} parallel requests: ${ok} x 200, ${limited} x 429`, () => pm.expect(limited).to.be.above(0));",
+                  "      pm.test('every 429 carries Retry-After >= 1', () => pm.expect(retryAfter.every(v => Number(v) >= 1)).to.be.true);",
+                  "      pm.test('429 body is RFC 7807 problem JSON', () => pm.expect(problemOk).to.be.true);",
+                  "      pm.test('no transport errors', () => pm.expect(statuses).to.not.include('ERR'));",
+                  "    }",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "bob · right after alice's burst",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gatewayUrl}}/api/v1/users/me",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bobToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200 - separate bucket per user: same IP, not limited\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "alice · after 2.5 s",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gatewayUrl}}/api/v1/users/me",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{aliceToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "setTimeout(() => {}, 2500);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200 - bucket refilled at 10 tokens/s\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "7 · Data protection and hardening",
+      "description": "Errors without internals, actuator locked down at the gateway and in each service.",
+      "item": [
+        {
+          "name": "Malformed JSON",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{gatewayUrl}}/api/v1/users/me",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{aliceToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"preferredCurrency\": ",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400 - bad input is a client error\", () => pm.response.to.have.status(400));",
+                  "pm.test('body is RFC 7807 problem JSON', () => { const b = pm.response.json(); pm.expect(b).to.have.property('status', pm.response.code); pm.expect(b).to.have.property('title'); });",
+                  "pm.test('no stack trace or class names leak', () => { const t = pm.response.text(); ['Exception', 'at com.', 'at org.', '\"trace\"'].forEach(s => pm.expect(t).to.not.include(s)); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Invalid field value",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{gatewayUrl}}/api/v1/users/me",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{aliceToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"preferredCurrency\": \"XYZ1\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400 - bean validation rejects it\", () => pm.response.to.have.status(400));",
+                  "pm.test('body is RFC 7807 problem JSON', () => { const b = pm.response.json(); pm.expect(b).to.have.property('status', pm.response.code); pm.expect(b).to.have.property('title'); });",
+                  "pm.test('no stack trace or class names leak', () => { const t = pm.response.text(); ['Exception', 'at com.', 'at org.', '\"trace\"'].forEach(s => pm.expect(t).to.not.include(s)); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Gateway · /actuator/health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gatewayUrl}}/actuator/health",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200 - health stays public for probes\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Gateway · /actuator/env",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gatewayUrl}}/actuator/env",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is one of 401 / 403 - every other actuator endpoint is denied at the edge\", () => pm.expect(pm.response.code).to.be.oneOf([401, 403]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Gateway · /actuator/env as ADMIN",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gatewayUrl}}/actuator/env",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403 - denied even for ADMIN at the edge\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "user-service · /actuator/health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{userServiceUrl}}/actuator/health",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200 - public\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "user-service · POST /actuator/refresh anonymous",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{userServiceUrl}}/actuator/refresh",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 401 - operational endpoints need a token\", () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "user-service · POST /actuator/refresh as alice",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{userServiceUrl}}/actuator/refresh",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{aliceToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403 - and the ADMIN role\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "user-service · GET /actuator/refresh as ops-admin",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{userServiceUrl}}/actuator/refresh",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "GET, not POST, on purpose: security lets ADMIN through and the endpoint answers 405, so the check proves authorization without actually refreshing config (which would re-read Vault)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 405 - ADMIN passes authorization; refresh itself only accepts POST, so nothing is refreshed\", () => pm.response.to.have.status(405));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "8 · Service-to-service",
+      "description": "The seed folder's transaction POST already exercised the Feign hop (transaction-service -> user-service with alice's token relayed). This folder exercises the gRPC hop (analytics-service -> budget-service, token in gRPC metadata). The negative gRPC checks need grpcurl: see docs/security/security-test-plan.md.",
+      "item": [
+        {
+          "name": "alice · GET /analytics/dashboard (gRPC to budget-service)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gatewayUrl}}/api/v1/analytics/dashboard?periodMonth={{periodMonth}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{aliceToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200 - analytics-service called budget-service over gRPC with alice's token\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "bob · GET /analytics/dashboard",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gatewayUrl}}/api/v1/analytics/dashboard?periodMonth={{periodMonth}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bobToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200 - bob gets his own dashboard\", () => pm.response.to.have.status(200));",
+                  "pm.test('response does not mention alice\\'s id', () => pm.expect(pm.response.text()).to.not.include(pm.collectionVariables.get('aliceId')));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "9 · Token lifecycle (Keycloak)",
+      "description": "Refresh-token rotation with reuse detection, logout, and the stateless-JWT trade-off: an access token issued before logout keeps working until it expires (5 minutes), which is why access tokens are short.",
+      "item": [
+        {
+          "name": "Refresh (rotation)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{keycloakUrl}}/realms/{{realm}}/protocol/openid-connect/token",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "refresh_token",
+                  "type": "text"
+                },
+                {
+                  "key": "client_id",
+                  "value": "{{devClientId}}",
+                  "type": "text"
+                },
+                {
+                  "key": "refresh_token",
+                  "value": "{{aliceRefreshToken}}",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200 - refresh accepted once\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('aliceOldRefreshToken', pm.collectionVariables.get('aliceRefreshToken'));",
+                  "pm.collectionVariables.set('aliceRefreshToken', body.refresh_token);",
+                  "pm.collectionVariables.set('aliceTokenBeforeLogout', body.access_token);",
+                  "pm.test('a new refresh token is issued (rotation)', () => pm.expect(body.refresh_token).to.not.eql(pm.collectionVariables.get('aliceOldRefreshToken')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reuse the old refresh token",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{keycloakUrl}}/realms/{{realm}}/protocol/openid-connect/token",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "refresh_token",
+                  "type": "text"
+                },
+                {
+                  "key": "client_id",
+                  "value": "{{devClientId}}",
+                  "type": "text"
+                },
+                {
+                  "key": "refresh_token",
+                  "value": "{{aliceOldRefreshToken}}",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400 - a used refresh token is dead (revokeRefreshToken, max reuse 0)\", () => pm.response.to.have.status(400));",
+                  "pm.test('error invalid_grant', () => pm.expect(pm.response.json().error).to.eql('invalid_grant'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Logout (end the Keycloak session)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{keycloakUrl}}/realms/{{realm}}/protocol/openid-connect/logout",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "client_id",
+                  "value": "{{devClientId}}",
+                  "type": "text"
+                },
+                {
+                  "key": "refresh_token",
+                  "value": "{{aliceRefreshToken}}",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204 - session ended\", () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Refresh after logout",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{keycloakUrl}}/realms/{{realm}}/protocol/openid-connect/token",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "refresh_token",
+                  "type": "text"
+                },
+                {
+                  "key": "client_id",
+                  "value": "{{devClientId}}",
+                  "type": "text"
+                },
+                {
+                  "key": "refresh_token",
+                  "value": "{{aliceRefreshToken}}",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400 - no session, no new tokens\", () => pm.response.to.have.status(400));",
+                  "pm.test('error invalid_grant', () => pm.expect(pm.response.json().error).to.eql('invalid_grant'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Access token issued before logout",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gatewayUrl}}/api/v1/users/me",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{aliceTokenBeforeLogout}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200 - stateless JWT: still valid until exp - the reason access tokens live only 5 minutes\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "10 · Run 5+ minutes after folder 0",
+      "description": "Uses alice's token from folder 0 once it is older than its 5-minute lifetime (+30 s clock skew).",
+      "item": [
+        {
+          "name": "Expired access token",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gatewayUrl}}/api/v1/users/me",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{expiryProbeToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const issuedAt = Number(pm.collectionVariables.get('expiryProbeIssuedAt') || 0);",
+                  "const elapsed = Math.round((Date.now() - issuedAt) / 1000);",
+                  "if (elapsed < 330) {",
+                  "  pm.test.skip(`token is only ${elapsed}s old - send this again after ${330 - elapsed}s`, () => {});",
+                  "} else {",
+                  "  pm.test('status 401 - expired access token', () => pm.response.to.have.status(401));",
+                  "  pm.test('errorCode TOKEN_EXPIRED', () => pm.expect(pm.response.json().errorCode).to.eql('TOKEN_EXPIRED'));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "gatewayUrl",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "keycloakUrl",
+      "value": "http://localhost:8180",
+      "type": "string"
+    },
+    {
+      "key": "realm",
+      "value": "spendwise",
+      "type": "string"
+    },
+    {
+      "key": "userServiceUrl",
+      "value": "http://localhost:8082",
+      "type": "string"
+    },
+    {
+      "key": "webOrigin",
+      "value": "http://localhost:5173",
+      "type": "string"
+    },
+    {
+      "key": "devClientId",
+      "value": "spendwise-dev-cli",
+      "type": "string"
+    },
+    {
+      "key": "aliceUser",
+      "value": "alice@spendwise.dev",
+      "type": "string"
+    },
+    {
+      "key": "alicePassword",
+      "value": "Alice#Dev2026!",
+      "type": "string"
+    },
+    {
+      "key": "bobUser",
+      "value": "bob@spendwise.dev",
+      "type": "string"
+    },
+    {
+      "key": "bobPassword",
+      "value": "Bob#Dev2026!x",
+      "type": "string"
+    },
+    {
+      "key": "adminUser",
+      "value": "ops-admin@spendwise.dev",
+      "type": "string"
+    },
+    {
+      "key": "adminPassword",
+      "value": "OpsAdmin#Dev2026!",
+      "type": "string"
+    },
+    {
+      "key": "serviceClientId",
+      "value": "transaction-service",
+      "type": "string"
+    },
+    {
+      "key": "serviceClientSecret",
+      "value": "dev-transaction-service-secret",
+      "type": "string"
+    },
+    {
+      "key": "aliceToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "aliceRefreshToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "aliceIdToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "aliceOldRefreshToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "aliceTokenBeforeLogout",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "bobToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "bobRefreshToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "bobIdToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "adminToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "adminRefreshToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "adminIdToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "serviceToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "aliceId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "bobId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "categoryId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "aliceTxId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "txDate",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "periodMonth",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "expiryProbeToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "expiryProbeIssuedAt",
+      "value": "",
+      "type": "string"
+    }
+  ]
+}
