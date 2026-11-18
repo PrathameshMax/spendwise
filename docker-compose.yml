@@ -399,9 +399,8 @@ services:
     restart: "no"
 
   discovery-server:
-    build:
-      context: .
-      dockerfile: discovery-server/Dockerfile
+    image: ghcr.io/prathameshmax/spendwise-discovery-server:main
+    pull_policy: always
     container_name: spendwise-discovery-server
     ports:
       - "8761:8761"
