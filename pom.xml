@@ -14,7 +14,6 @@
     <modules>
         <module>spendwise-common</module>
         <module>spendwise-events</module>
-        <module>config-server</module>
         <module>auth-service</module>
         <module>user-service</module>
         <module>transaction-service</module>

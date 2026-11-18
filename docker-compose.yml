@@ -415,9 +415,8 @@ services:
           memory: 384M
 
   config-server:
-    build:
-      context: .
-      dockerfile: config-server/Dockerfile
+    image: ghcr.io/prathameshmax/spendwise-config-server:main
+    pull_policy: always
     container_name: spendwise-config-server
     ports:
       - "8888:8888"
