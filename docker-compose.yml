@@ -433,9 +433,8 @@ services:
           memory: 384M
 
   user-service:
-    build:
-      context: .
-      dockerfile: user-service/Dockerfile
+    image: ghcr.io/prathameshmax/spendwise-user-service:main
+    pull_policy: always
     container_name: spendwise-user-service
     ports:
       - "8082:8082"
