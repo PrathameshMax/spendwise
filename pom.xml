@@ -16,7 +16,6 @@
         <module>spendwise-events</module>
         <module>auth-service</module>
         <module>transaction-service</module>
-        <module>budget-service</module>
         <module>analytics-service</module>
         <module>api-gateway</module>
     </modules>
