@@ -467,9 +467,8 @@ services:
           memory: 512M
 
   transaction-service:
-    build:
-      context: .
-      dockerfile: transaction-service/Dockerfile
+    image: ghcr.io/prathameshmax/spendwise-transaction-service:main
+    pull_policy: always
     container_name: spendwise-transaction-service
     ports:
       - "8083:8083"
