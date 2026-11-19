@@ -777,11 +777,8 @@ services:
   # the browser. No depends_on on purpose: with the gateway down the page
   # shows "Cannot reach the API gateway" instead of not starting at all.
   web:
-    build:
-      context: ./spendwise-web
-      args:
-        VITE_GATEWAY_URL: http://localhost:8080
-        VITE_KEYCLOAK_ACCOUNT_URL: http://localhost:8180/realms/spendwise/account
+    image: ghcr.io/prathameshmax/spendwise-web:main
+    pull_policy: always
     container_name: spendwise-web
     ports:
       - "5173:8080"
