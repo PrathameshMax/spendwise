@@ -15,7 +15,6 @@
         <module>spendwise-common</module>
         <module>spendwise-events</module>
         <module>auth-service</module>
-        <module>api-gateway</module>
     </modules>
 
     <properties>

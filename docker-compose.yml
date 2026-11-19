@@ -719,9 +719,8 @@ services:
           memory: 512M
 
   api-gateway:
-    build:
-      context: .
-      dockerfile: api-gateway/Dockerfile
+    image: ghcr.io/prathameshmax/spendwise-api-gateway:main
+    pull_policy: always
     container_name: spendwise-api-gateway
     ports:
       - "8080:8080"
