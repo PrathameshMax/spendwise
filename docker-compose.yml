@@ -657,9 +657,8 @@ services:
           memory: 512M
 
   analytics-service:
-    build:
-      context: .
-      dockerfile: analytics-service/Dockerfile
+    image: ghcr.io/prathameshmax/spendwise-analytics-service:main
+    pull_policy: always
     container_name: spendwise-analytics-service
     ports:
       - "8086:8086"
